@@ -3,6 +3,7 @@
     <ReaderTopBar
       :title="currentChapter?.title || '加载中...'"
       :is-bookmarked="isBookmarked"
+      :visible="topBarVisible"
       @back="goBack"
       @toggle-toc="showTOC = true"
       @toggle-bookmark="handleToggleBookmark"
@@ -14,6 +15,7 @@
       :settings="settings"
       :loading="loading"
       :error="error"
+      class="reader-content-area"
       @retry="currentChapter && loadChapter(currentChapter.number)"
     />
 
@@ -23,6 +25,7 @@
       :total-chapters="totalChapters"
       :is-first-chapter="isFirstChapter"
       :is-last-chapter="isLastChapter"
+      :visible="bottomBarVisible"
       @prev="goPrev"
       @next="goNext"
       @open-settings="showSettings = true"
@@ -91,6 +94,30 @@ const { bookmarks, hasBookmark, toggleBookmark, removeBookmark } = useBookmarks(
 const showTOC = ref(false)
 const showSettings = ref(false)
 
+/** 滚动状态 — 用于控制栏位可见性 */
+const scrollY = ref(0)
+const viewHeight = ref(window.innerHeight)
+
+/** 滚动到顶部（阈值 60px） */
+const isAtTop = computed(() => scrollY.value < 60)
+
+/** 滚动到底部（阈值 120px，考虑底栏高度） */
+const isAtBottom = computed(() => {
+  const docHeight = document.documentElement.scrollHeight
+  return scrollY.value + viewHeight.value >= docHeight - 120
+})
+
+/** 顶栏可见：滚动在顶部 */
+const topBarVisible = computed(() => isAtTop.value)
+
+/** 底栏可见：滚动在底部 */
+const bottomBarVisible = computed(() => isAtBottom.value)
+
+/** 更新滚动状态 */
+function handleScroll() {
+  scrollY.value = window.scrollY
+}
+
 /** 已读章节集合：当前章节之前的全部标记为已读 */
 const readSet = computed(() => {
   const s = new Set<number>()
@@ -139,17 +166,21 @@ function goBack() {
 
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('scroll', handleScroll, { passive: true })
+  window.addEventListener('resize', () => { viewHeight.value = window.innerHeight })
   const chapterNum = chapterNumParam ? Number(chapterNumParam) : undefined
   await init(chapterNum)
-  // 恢复滚动位置
+  // 恢复滚动位置，并初始化滚动状态
   const savedTop = getSavedScrollTop()
   if (savedTop > 0) {
     window.scrollTo(0, savedTop)
   }
+  scrollY.value = window.scrollY
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('scroll', handleScroll)
   updateScrollPosition(window.scrollY)
 })
 </script>
@@ -161,5 +192,11 @@ onUnmounted(() => {
   flex-direction: column;
   background: var(--reader-bg, #fafafa);
   transition: background 0.3s;
+}
+
+/* 补偿固定顶栏/底栏高度，防止内容被遮挡 */
+.reader-content-area {
+  padding-top: 48px;
+  padding-bottom: 56px;
 }
 </style>

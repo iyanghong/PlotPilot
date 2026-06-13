@@ -1,5 +1,10 @@
 <template>
-  <div class="reader-bottom-bar">
+  <div
+    class="reader-bottom-bar"
+    :class="{ 'bar-visible': isActive }"
+    @mouseenter="isHovering = true"
+    @mouseleave="isHovering = false"
+  >
     <button class="bottom-btn" :disabled="isFirstChapter" @click="$emit('prev')">
       ◀ 上一章
     </button>
@@ -16,11 +21,14 @@
 </template>
 
 <script setup lang="ts">
-defineProps<{
+import { ref, computed } from 'vue'
+
+const props = defineProps<{
   currentNumber: number
   totalChapters: number
   isFirstChapter: boolean
   isLastChapter: boolean
+  visible: boolean
 }>()
 
 defineEmits<{
@@ -28,18 +36,37 @@ defineEmits<{
   next: []
   'open-settings': []
 }>()
+
+/** 鼠标是否悬停在栏位区域 */
+const isHovering = ref(false)
+
+/** 有效可见：滚动到底部 或 鼠标悬停 */
+const isActive = computed(() => props.visible || isHovering.value)
 </script>
 
 <style scoped>
 .reader-bottom-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 16px;
   padding: 10px 20px;
-  background: #f0ece6;
-  border-top: 1px solid #e0d8cc;
+  background: transparent;
+  border-top: 1px solid transparent;
   color: #5c4a3a;
+  opacity: 0.35;
+  transition: background 0.4s ease, opacity 0.4s ease, border-color 0.4s ease;
+}
+
+.reader-bottom-bar.bar-visible {
+  background: #f0ece6;
+  border-top-color: #e0d8cc;
+  opacity: 1;
 }
 
 .bottom-btn {
@@ -53,7 +80,7 @@ defineEmits<{
   transition: all 0.15s;
 }
 
-.bottom-btn:hover:not(:disabled) {
+.reader-bottom-bar.bar-visible .bottom-btn:hover:not(:disabled) {
   background: #e8e0d4;
   border-color: #8b7355;
 }
