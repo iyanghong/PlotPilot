@@ -10,13 +10,17 @@
     />
 
     <ReaderContent
+      ref="contentRef"
       :chapter="currentChapter"
       :total-chapters="totalChapters"
       :settings="settings"
       :loading="loading"
       :error="error"
+      :is-last-chapter="isLastChapter"
       class="reader-content-area"
       @retry="currentChapter && loadChapter(currentChapter.number)"
+      @prev-chapter="goPrev"
+      @next-chapter="goNext"
     />
 
     <ReaderBottomBar
@@ -134,14 +138,25 @@ const isBookmarked = computed(() =>
   currentChapter.value ? hasBookmark(currentChapter.value.number) : false
 )
 
-/** 键盘导航：← 上一章 → 下一章 */
+/** ReaderContent 引用（curl 模式翻页用） */
+const contentRef = ref<InstanceType<typeof ReaderContent> | null>(null)
+
+/** 键盘导航：curl 模式翻页 / 普通模式翻章 */
 function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'ArrowLeft') {
     e.preventDefault()
-    goPrev()
+    if (settings.pageMode === 'curl') {
+      contentRef.value?.prevPage()
+    } else {
+      goPrev()
+    }
   } else if (e.key === 'ArrowRight') {
     e.preventDefault()
-    goNext()
+    if (settings.pageMode === 'curl') {
+      contentRef.value?.nextPage()
+    } else {
+      goNext()
+    }
   }
 }
 
@@ -194,9 +209,15 @@ onUnmounted(() => {
   transition: background 0.3s;
 }
 
-/* 补偿固定顶栏/底栏高度，防止内容被遮挡 */
+/* 补偿固定顶栏/底栏高度，防止内容被遮挡（curl 模式除外） */
 .reader-content-area {
   padding-top: 48px;
   padding-bottom: 56px;
+}
+
+.reader-content-area:has(.page-flip-canvas) {
+  padding: 0;
+  flex: 1;
+  min-height: 0;
 }
 </style>

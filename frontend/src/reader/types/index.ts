@@ -33,7 +33,7 @@ export interface ReaderSettings {
   marginWidth: number // 默认 48
   theme: 'day' | 'night' | 'parchment' | 'green'
   fontFamily: 'system' | 'serif' | 'kai' | 'hei'
-  pageMode: 'scroll' | 'paged'
+  pageMode: 'scroll' | 'paged' | 'curl'
 }
 
 /** 书签 */

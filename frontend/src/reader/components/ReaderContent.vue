@@ -9,6 +9,17 @@
     <div v-else-if="!chapter || !chapter.content?.trim()" class="reader-empty">
       本章内容为空
     </div>
+    <!-- 仿真翻页模式：Canvas 渲染 -->
+    <PageFlipCanvas
+      v-else-if="pageMode === 'curl'"
+      ref="pageFlipRef"
+      :content="chapter.content"
+      :settings="settings"
+      :is-last-chapter="isLastChapter"
+      @prev-chapter="$emit('prev-chapter')"
+      @next-chapter="$emit('next-chapter')"
+    />
+    <!-- 滚动/分页模式：DOM 渲染 -->
     <div
       v-else
       class="reader-body"
@@ -25,10 +36,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { NSpin, NButton } from 'naive-ui'
 import type { ChapterContent, ReaderSettings } from '../types'
 import { settingsToCSSVars } from '../composables/useReaderSettings'
+import PageFlipCanvas from './PageFlipCanvas.vue'
 
 const props = defineProps<{
   chapter: ChapterContent | null
@@ -36,9 +48,19 @@ const props = defineProps<{
   settings: ReaderSettings
   loading: boolean
   error: string | null
+  isLastChapter: boolean
 }>()
 
-defineEmits<{ retry: [] }>()
+defineEmits<{ retry: []; 'prev-chapter': []; 'next-chapter': [] }>()
+
+/** PageFlipCanvas 引用，用于键盘翻页 */
+const pageFlipRef = ref<InstanceType<typeof PageFlipCanvas> | null>(null)
+
+/** 暴露翻页方法供父组件键盘事件调用 */
+defineExpose({
+  prevPage() { pageFlipRef.value?.prevPage() },
+  nextPage() { pageFlipRef.value?.nextPage() },
+})
 
 // 章节标题：优先使用实际标题，否则回退到「第 N 章」
 const displayTitle = computed(() => {

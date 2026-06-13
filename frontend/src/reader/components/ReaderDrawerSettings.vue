@@ -98,6 +98,11 @@
             :class="{ active: settings.pageMode === 'paged' }"
             @click="update('pageMode', 'paged' as const)"
           >分页</button>
+          <button
+            class="settings-option"
+            :class="{ active: settings.pageMode === 'curl' }"
+            @click="update('pageMode', 'curl' as const)"
+          >仿真翻页</button>
         </div>
       </div>
 
