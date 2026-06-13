@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { readerRoutes } from '@/reader'
 
 const Home = () => import('../views/Home.vue')
 const Workbench = () => import('../views/Workbench.vue')
@@ -23,6 +24,7 @@ const router = createRouter({
       name: 'CharacterSchedulerSimulator',
       component: CharacterSchedulerSimulator,
     },
+    ...readerRoutes,
   ],
 })
 
