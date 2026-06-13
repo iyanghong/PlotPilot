@@ -43,9 +43,9 @@ class SqliteNovelRepository(NovelRepository):
                 last_audit_vector_stored, last_audit_foreshadow_stored,
                 last_audit_triples_extracted, last_audit_quality_scores, last_audit_issues,
                 target_words_per_chapter, audit_progress, generation_prefs_json,
-                created_at, updated_at
+                user_id, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 slug = excluded.slug,
@@ -76,6 +76,7 @@ class SqliteNovelRepository(NovelRepository):
                 target_words_per_chapter = excluded.target_words_per_chapter,
                 audit_progress = excluded.audit_progress,
                 generation_prefs_json = excluded.generation_prefs_json,
+                user_id = excluded.user_id,
                 updated_at = excluded.updated_at
         """
         now = datetime.utcnow().isoformat()
@@ -148,6 +149,7 @@ class SqliteNovelRepository(NovelRepository):
             twpc,
             audit_progress,
             generation_prefs_json,
+            getattr(novel, "user_id", None),
             now,
             now
         ))
@@ -260,6 +262,42 @@ class SqliteNovelRepository(NovelRepository):
             raise
         return [self._row_to_novel(NovelId(row['id']), row) for row in rows]
 
+    def list_by_user(self, user_id: str) -> List[Novel]:
+        """列出指定用户的全部小说"""
+        sql = "SELECT * FROM novels WHERE user_id = ? ORDER BY created_at DESC"
+        try:
+            rows = self.db.fetch_all(sql, (user_id,))
+        except sqlite3.DatabaseError as e:
+            if is_sqlite_storage_corruption(e):
+                self._record_sqlite_corruption(e)
+                logger.error(
+                    "SQLite storage corruption in user novel list; returning empty list. %s",
+                    e,
+                    exc_info=True,
+                )
+                return []
+            raise
+        return [self._row_to_novel(NovelId(row['id']), row) for row in rows]
+
+    def get_by_id_and_user(self, novel_id: NovelId, user_id: str) -> Optional[Novel]:
+        """根据 ID 和用户 ID 获取小说（用户隔离校验）"""
+        sql = "SELECT * FROM novels WHERE id = ? AND user_id = ?"
+        try:
+            row = self.db.fetch_one(sql, (novel_id.value, user_id))
+        except sqlite3.DatabaseError as e:
+            if is_sqlite_storage_corruption(e):
+                self._record_sqlite_corruption(e)
+                logger.error(
+                    "SQLite storage corruption while reading novel id=%s: %s",
+                    novel_id.value,
+                    e,
+                )
+                return None
+            raise
+        if not row:
+            return None
+        return self._row_to_novel(novel_id, row)
+
     def find_by_autopilot_status(self, status: str) -> List[Novel]:
         """根据自动驾驶状态查找小说列表（优化版本，避免 N+1）
 
@@ -361,6 +399,7 @@ class SqliteNovelRepository(NovelRepository):
             target_words_per_chapter=row.get("target_words_per_chapter", 2500),
             audit_progress=row.get("audit_progress"),
             generation_prefs=generation_prefs,
+            user_id=row.get("user_id"),
         )
 
     def delete(self, novel_id: NovelId) -> None:

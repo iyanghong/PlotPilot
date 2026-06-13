@@ -43,6 +43,16 @@ class NovelRepository(ABC):
         pass
 
     @abstractmethod
+    def list_by_user(self, user_id: str) -> List[Novel]:
+        """列出指定用户的全部小说"""
+        pass
+
+    @abstractmethod
+    def get_by_id_and_user(self, novel_id: NovelId, user_id: str) -> Optional[Novel]:
+        """根据 ID 和用户 ID 获取小说（用户隔离校验）"""
+        pass
+
+    @abstractmethod
     def exists(self, novel_id: NovelId) -> bool:
         """检查小说是否存在"""
         pass

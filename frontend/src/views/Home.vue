@@ -11,18 +11,36 @@
       <div class="container">
         <!-- Header -->
         <header class="header">
-          <n-button
-            quaternary
-            circle
-            size="medium"
-            class="header-theme-btn"
-            aria-label="应用设置"
-            @click="appSettingsShell.open()"
-          >
-            <template #icon>
-              <n-icon :component="IconThemeSettings" :size="22" />
-            </template>
-          </n-button>
+          <div class="header-actions">
+            <n-button
+              quaternary
+              circle
+              size="medium"
+              class="header-theme-btn"
+              aria-label="应用设置"
+              @click="appSettingsShell.open()"
+            >
+              <template #icon>
+                <n-icon :component="IconThemeSettings" :size="22" />
+              </template>
+            </n-button>
+
+            <!-- 用户菜单 -->
+            <n-dropdown
+              v-if="authStore.isAuthenticated"
+              trigger="click"
+              placement="bottom-end"
+              :options="userMenuOptions"
+              @select="handleUserMenuSelect"
+            >
+              <div class="header-user-btn" role="button" aria-label="用户菜单">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18">
+                  <path fill="currentColor" d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                </svg>
+                <span class="header-user-name">{{ authStore.user?.username }}</span>
+              </div>
+            </n-dropdown>
+          </div>
           <div class="header-content">
             <h1 class="title">墨枢 · 长篇叙事工作台</h1>
             <p class="subtitle">
@@ -415,11 +433,12 @@
 <script setup lang="ts">
 import { defineAsyncComponent, h, ref, onMounted, computed, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { useMessage, NIcon } from 'naive-ui'
+import { NDropdown, useMessage, NIcon } from 'naive-ui'
 import { novelApi, type NovelDTO } from '../api/novel'
 import { isWizardCompleted } from '@/utils/wizardStageCache'
 import StatsSidebar from '@/components/stats/StatsSidebar.vue'
 import { useAppSettingsShellStore } from '@/stores/appSettingsShellStore'
+import { useAuthStore } from '@/stores/authStore'
 import { parseGenreWorldFromPremise } from '@/utils/premisePresets'
 import { useStatsStore } from '@/stores/statsStore'
 import { storageKeys } from '@/config/storageKeys'
@@ -482,6 +501,19 @@ const router = useRouter()
 const message = useMessage()
 const statsStore = useStatsStore()
 const appSettingsShell = useAppSettingsShellStore()
+const authStore = useAuthStore()
+
+/** 用户菜单 */
+const userMenuOptions = [
+  { label: '退出登录', key: 'logout' },
+]
+
+function handleUserMenuSelect(key: string) {
+  if (key === 'logout') {
+    authStore.logout()
+    router.push('/login')
+  }
+}
 
 const createInputRef = ref<any>(null)
 const showAdvanced = ref(false)
@@ -825,16 +857,49 @@ onMounted(() => {
   animation: fade-up 0.55s ease both;
 }
 
-.header-theme-btn {
+.header-actions {
   position: absolute;
   top: 0;
   right: 0;
   z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-theme-btn {
   color: var(--app-text-secondary);
 }
 
 .header-theme-btn:hover {
   color: var(--color-brand, #4f46e5);
+}
+
+/* 用户菜单按钮 */
+.header-user-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  cursor: pointer;
+  border-radius: 8px;
+  color: var(--app-text-secondary);
+  transition: all 0.18s ease;
+  user-select: none;
+}
+
+.header-user-btn:hover {
+  color: var(--app-text-primary);
+  background: var(--app-surface-subtle);
+}
+
+.header-user-name {
+  font-size: 13px;
+  font-weight: 600;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .header-content {

@@ -57,6 +57,38 @@ def _migrate_triples_columns(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _apply_rbac_migration(conn: sqlite3.Connection) -> None:
+    """为已有数据库添加用户表和 novels.user_id 列（幂等）"""
+    # 创建 users 表（幂等）
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'user',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
+    except sqlite3.OperationalError as e:
+        logger.warning("RBAC migration skip users table: %s", e)
+
+    # 为 novels 表添加 user_id 列（幂等）
+    cur = conn.execute("PRAGMA table_info(novels)")
+    cols = {row[1] for row in cur.fetchall()}
+    if "user_id" not in cols:
+        try:
+            conn.execute("ALTER TABLE novels ADD COLUMN user_id TEXT DEFAULT NULL")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_novels_user_id ON novels(user_id)")
+            logger.info("RBAC migration: added novels.user_id column")
+        except sqlite3.OperationalError as e:
+            logger.warning("RBAC migration skip novels.user_id: %s", e)
+
+    conn.commit()
+
+
 def _migrate_novels_columns_before_schema_script(conn: sqlite3.Connection) -> None:
     """旧库在 executescript 之前补齐 novels 列，避免 IF NOT EXISTS 跳过建表后索引引用缺列失败。"""
     cur = conn.execute(
@@ -467,6 +499,7 @@ class DatabaseConnection:
         schema_path = _database_asset_dir() / "schema.sql"
         if schema_path.exists():
             _migrate_novels_columns_before_schema_script(conn)
+            _apply_rbac_migration(conn)
             with open(schema_path, 'r', encoding='utf-8') as f:
                 schema_sql = f.read()
                 conn.executescript(schema_sql)

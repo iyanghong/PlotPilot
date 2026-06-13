@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 from application.paths import DATA_DIR
 from infrastructure.persistence.storage.file_storage import FileStorage
 from infrastructure.persistence.database.connection import get_database
+from infrastructure.persistence.repositories.sqlite_user_repository import SqliteUserRepository
 from infrastructure.persistence.database.sqlite_novel_repository import SqliteNovelRepository
 from infrastructure.persistence.database.sqlite_chapter_repository import SqliteChapterRepository
 from infrastructure.persistence.database.sqlite_knowledge_repository import SqliteKnowledgeRepository
@@ -1320,3 +1321,110 @@ def get_unified_prop_context_builder():
         get_unified_prop_repository(),
         get_prop_event_repository(),
     )
+
+
+# ── 认证依赖注入（RBAC）──
+
+import os as _os
+import threading as _threading
+import uuid as _uuid
+
+from fastapi import Depends as _Depends, HTTPException as _HTTPException, Request as _Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+from domain.auth.entities.user import User, UserRole
+from application.auth.auth_service import AuthService
+
+_AUTH_MODE = _os.environ.get("PLOTPILOT_AUTH_MODE", "local").lower()
+_DEFAULT_ADMIN_USERNAME = _os.environ.get("PLOTPILOT_DEFAULT_USER", "admin")
+_DEFAULT_ADMIN_PASSWORD = _os.environ.get("PLOTPILOT_DEFAULT_PASSWORD", "")
+
+_auth_user_repo: Optional[SqliteUserRepository] = None
+_auth_service_instance: Optional[AuthService] = None
+_builtin_admin: Optional[User] = None
+_admin_initialized = False
+_admin_init_lock = _threading.Lock()
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def _get_auth_user_repo() -> SqliteUserRepository:
+    """获取用户仓储单例"""
+    global _auth_user_repo
+    if _auth_user_repo is None:
+        _auth_user_repo = SqliteUserRepository(get_database())
+    return _auth_user_repo
+
+
+def _get_auth_service() -> AuthService:
+    """获取认证服务单例"""
+    global _auth_service_instance
+    if _auth_service_instance is None:
+        _auth_service_instance = AuthService(_get_auth_user_repo())
+    return _auth_service_instance
+
+
+def _ensure_builtin_admin() -> User:
+    """确保内置管理员用户存在
+
+    local 模式 / web 模式首次启动时自动创建管理员。
+    web 模式下，密码由 PLOTPILOT_DEFAULT_PASSWORD 环境变量指定。
+    """
+    global _builtin_admin, _admin_initialized
+    if _builtin_admin is not None:
+        return _builtin_admin
+
+    with _admin_init_lock:
+        if _admin_initialized:
+            repo = _get_auth_user_repo()
+            _builtin_admin = repo.get_by_username(_DEFAULT_ADMIN_USERNAME)
+            return _builtin_admin
+
+        repo = _get_auth_user_repo()
+        admin = repo.get_by_username(_DEFAULT_ADMIN_USERNAME)
+        if admin is None:
+            # 计算密码哈希
+            password_hash = ""
+            if _DEFAULT_ADMIN_PASSWORD:
+                from application.auth.auth_service import _hash_password
+                password_hash = _hash_password(_DEFAULT_ADMIN_PASSWORD)
+            admin = User(
+                id=_uuid.uuid4().hex[:16],
+                username=_DEFAULT_ADMIN_USERNAME,
+                password_hash=password_hash,
+                role=UserRole.ADMIN,
+            )
+            repo.save(admin)
+            logging.getLogger(__name__).info(
+                "已自动创建内置管理员用户: %s (id=%s)", _DEFAULT_ADMIN_USERNAME, admin.id
+            )
+        _builtin_admin = admin
+        _admin_initialized = True
+        return admin
+
+
+def get_current_user(
+    request: _Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = _Depends(_bearer_scheme),
+) -> User:
+    """获取当前用户（FastAPI 依赖注入）
+
+    local 模式：自动返回内置管理员用户
+    web 模式：从 Authorization Bearer Token 解析用户
+    """
+    if _AUTH_MODE == "web":
+        if credentials is None:
+            raise _HTTPException(status_code=401, detail="未提供认证 Token")
+        auth_service = _get_auth_service()
+        user = auth_service.get_user_from_token(credentials.credentials)
+        if user is None:
+            raise _HTTPException(status_code=401, detail="Token 无效或已过期")
+        return user
+
+    return _ensure_builtin_admin()
+
+
+def require_admin(user: User = _Depends(get_current_user)) -> User:
+    """要求管理员权限的依赖"""
+    if not user.is_admin():
+        raise _HTTPException(status_code=403, detail="需要管理员权限")
+    return user

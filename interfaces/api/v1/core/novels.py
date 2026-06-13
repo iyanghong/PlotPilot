@@ -14,6 +14,8 @@ from interfaces.api.dependencies import (
     get_auto_bible_generator,
     get_auto_knowledge_generator
 )
+from interfaces.api.dependencies import get_current_user
+from domain.auth.entities.user import User
 from interfaces.api.urls import bible_generation_status_url
 from domain.shared.exceptions import EntityNotFoundError
 
@@ -117,7 +119,8 @@ async def _generate_bible_background(
 @router.post("/", response_model=NovelDTO, status_code=201)
 async def create_novel(
     request: CreateNovelRequest,
-    service: NovelService = Depends(get_novel_service)
+    service: NovelService = Depends(get_novel_service),
+    user: User = Depends(get_current_user),
 ):
     """创建新小说（不自动生成 Bible）
 
@@ -130,6 +133,7 @@ async def create_novel(
     Args:
         request: 创建小说请求
         service: Novel 服务
+        user: 当前用户（自动注入）
 
     Returns:
         创建的小说 DTO
@@ -149,6 +153,7 @@ async def create_novel(
         special_requirements=request.special_requirements,
         length_tier=request.length_tier,
         target_words_per_chapter=request.target_words_per_chapter,
+        user_id=user.id,
     )
 
     return novel_dto
@@ -157,23 +162,29 @@ async def create_novel(
 @router.get("/{novel_id}", response_model=NovelDTO)
 async def get_novel(
     novel_id: str,
-    service: NovelService = Depends(get_novel_service)
+    service: NovelService = Depends(get_novel_service),
+    user: User = Depends(get_current_user),
 ):
     """获取小说详情
 
     Args:
         novel_id: 小说 ID
         service: Novel 服务
+        user: 当前用户（自动注入）
 
     Returns:
         小说 DTO
 
     Raises:
-        HTTPException: 如果小说不存在
+        HTTPException 404: 小说不存在
+        HTTPException 403: 无权访问
     """
     novel = service.get_novel(novel_id)
     if novel is None:
         raise HTTPException(status_code=404, detail=f"Novel not found: {novel_id}")
+    # 用户隔离校验：非管理员只能看自己的小说
+    if not user.is_admin() and novel.user_id and novel.user_id != user.id:
+        raise HTTPException(status_code=403, detail="无权访问该小说")
     return novel
 
 
@@ -181,16 +192,21 @@ async def get_novel(
 async def list_novels(
     response: Response,
     service: NovelService = Depends(get_novel_service),
+    user: User = Depends(get_current_user),
 ):
-    """列出所有小说
+    """列出小说（管理员看全部，用户只看自己的）
 
     Args:
         service: Novel 服务
+        user: 当前用户（自动注入）
 
     Returns:
         小说 DTO 列表
     """
-    novels = service.list_novels()
+    if user.is_admin():
+        novels = service.list_novels()
+    else:
+        novels = service.list_novels_for_user(user.id)
     repo = service.novel_repository
     consume = getattr(repo, "consume_sqlite_corruption_warning", None)
     if callable(consume) and consume():
@@ -202,7 +218,8 @@ async def list_novels(
 async def update_novel(
     novel_id: str,
     request: UpdateNovelRequest,
-    service: NovelService = Depends(get_novel_service)
+    service: NovelService = Depends(get_novel_service),
+    user: User = Depends(get_current_user),
 ):
     """更新小说基本信息
 
@@ -210,14 +227,22 @@ async def update_novel(
         novel_id: 小说 ID
         request: 更新小说请求
         service: Novel 服务
+        user: 当前用户（自动注入）
 
     Returns:
         更新后的小说 DTO
 
     Raises:
-        HTTPException: 如果小说不存在
+        HTTPException: 如果小说不存在或无权限
     """
     try:
+        # 用户隔离校验
+        if not user.is_admin():
+            novel = service.get_novel(novel_id)
+            if novel is None:
+                raise HTTPException(status_code=404, detail=f"Novel not found: {novel_id}")
+            if novel.user_id and novel.user_id != user.id:
+                raise HTTPException(status_code=403, detail="无权修改该小说")
         return service.update_novel(
             novel_id,
             request.title,
@@ -235,7 +260,8 @@ async def update_novel(
 async def update_novel_stage(
     novel_id: str,
     request: UpdateStageRequest,
-    service: NovelService = Depends(get_novel_service)
+    service: NovelService = Depends(get_novel_service),
+    user: User = Depends(get_current_user),
 ):
     """更新小说阶段
 
@@ -243,6 +269,7 @@ async def update_novel_stage(
         novel_id: 小说 ID
         request: 更新阶段请求
         service: Novel 服务
+        user: 当前用户（自动注入）
 
     Returns:
         更新后的小说 DTO
@@ -251,6 +278,12 @@ async def update_novel_stage(
         HTTPException: 如果小说不存在
     """
     try:
+        if not user.is_admin():
+            novel = service.get_novel(novel_id)
+            if novel is None:
+                raise HTTPException(status_code=404, detail=f"Novel not found: {novel_id}")
+            if novel.user_id and novel.user_id != user.id:
+                raise HTTPException(status_code=403, detail="无权操作该小说")
         return service.update_novel_stage(novel_id, request.stage)
     except EntityNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -259,14 +292,23 @@ async def update_novel_stage(
 @router.delete("/{novel_id}", status_code=204)
 async def delete_novel(
     novel_id: str,
-    service: NovelService = Depends(get_novel_service)
+    service: NovelService = Depends(get_novel_service),
+    user: User = Depends(get_current_user),
 ):
     """删除小说
 
     Args:
         novel_id: 小说 ID
         service: Novel 服务
+        user: 当前用户（自动注入）
     """
+    # 用户隔离校验：非管理员只能删除自己的小说
+    if not user.is_admin():
+        novel = service.get_novel(novel_id)
+        if novel is None:
+            raise HTTPException(status_code=404, detail=f"Novel not found: {novel_id}")
+        if novel.user_id and novel.user_id != user.id:
+            raise HTTPException(status_code=403, detail="无权删除该小说")
     service.delete_novel(novel_id)
 
 
@@ -278,6 +320,7 @@ async def generate_bible_alias(
     bible_generator: AutoBibleGenerator = Depends(get_auto_bible_generator),
     knowledge_generator: AutoKnowledgeGenerator = Depends(get_auto_knowledge_generator),
     novel_service: NovelService = Depends(get_novel_service),
+    user: User = Depends(get_current_user),
 ):
     """手动触发 Bible 生成（别名路由，与 POST /bible/novels/{novel_id}/generate 等价）
 
@@ -285,6 +328,7 @@ async def generate_bible_alias(
         novel_id: 小说 ID
         background_tasks: FastAPI 后台任务
         stage: 生成阶段 (all / worldbuilding / characters / locations)
+        user: 当前用户（自动注入）
 
     Returns:
         202 Accepted
@@ -295,6 +339,9 @@ async def generate_bible_alias(
         novel = novel_service.get_novel(novel_id)
         if not novel:
             raise HTTPException(status_code=404, detail=f"Novel not found: {novel_id}")
+        # 用户隔离校验
+        if not user.is_admin() and novel.user_id and novel.user_id != user.id:
+            raise HTTPException(status_code=403, detail="无权操作该小说")
 
         async def _generate_task():
             try:
@@ -337,22 +384,30 @@ async def generate_bible_alias(
 async def update_auto_approve_mode(
     novel_id: str,
     request: UpdateAutoApproveRequest,
-    service: NovelService = Depends(get_novel_service)
+    service: NovelService = Depends(get_novel_service),
+    user: User = Depends(get_current_user),
 ):
     """更新全自动模式设置
-    
+
     Args:
         novel_id: 小说 ID
         request: 更新全自动模式请求
         service: Novel 服务
-        
+        user: 当前用户（自动注入）
+
     Returns:
         更新后的小说 DTO
-        
+
     Raises:
-        HTTPException: 如果小说不存在
+        HTTPException: 如果小说不存在或无权限
     """
     try:
+        if not user.is_admin():
+            novel = service.get_novel(novel_id)
+            if novel is None:
+                raise HTTPException(status_code=404, detail=f"Novel not found: {novel_id}")
+            if novel.user_id and novel.user_id != user.id:
+                raise HTTPException(status_code=403, detail="无权操作该小说")
         return service.update_auto_approve_mode(novel_id, request.auto_approve_mode)
     except EntityNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -361,21 +416,28 @@ async def update_auto_approve_mode(
 @router.get("/{novel_id}/statistics")
 async def get_novel_statistics(
     novel_id: str,
-    service: NovelService = Depends(get_novel_service)
+    service: NovelService = Depends(get_novel_service),
+    user: User = Depends(get_current_user),
 ):
     """获取小说统计信息
 
     Args:
         novel_id: 小说 ID
         service: Novel 服务
+        user: 当前用户（自动注入）
 
     Returns:
         统计信息字典
 
     Raises:
-        HTTPException: 如果小说不存在
+        HTTPException: 如果小说不存在或无权限
     """
     try:
+        novel = service.get_novel(novel_id)
+        if novel is None:
+            raise HTTPException(status_code=404, detail=f"Novel not found: {novel_id}")
+        if not user.is_admin() and novel.user_id and novel.user_id != user.id:
+            raise HTTPException(status_code=403, detail="无权访问该小说")
         return service.get_novel_statistics(novel_id)
     except EntityNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))

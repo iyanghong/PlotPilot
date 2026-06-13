@@ -89,6 +89,22 @@
           <path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/>
         </svg>
       </div>
+
+      <!-- 用户菜单 -->
+      <n-dropdown
+        v-if="authStore.isAuthenticated"
+        trigger="click"
+        placement="bottom-end"
+        :options="userMenuOptions"
+        @select="handleUserMenuSelect"
+      >
+        <div class="user-trigger" role="button" aria-label="用户菜单">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18">
+            <path fill="currentColor" d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+          </svg>
+          <span class="user-name">{{ authStore.user?.username }}</span>
+        </div>
+      </n-dropdown>
     </div>
   </div>
 </template>
@@ -101,6 +117,7 @@ import { useStatsStore } from '@/stores/statsStore'
 import { novelApi } from '@/api/novel'
 import GlobalLLMEntryButton from '@/components/global/GlobalLLMEntryButton.vue'
 import PromptPlazaEntryButton from '@/components/global/PromptPlazaEntryButton.vue'
+import { useAuthStore } from '@/stores/authStore'
 
 const props = defineProps<{
   slug: string
@@ -112,6 +129,7 @@ defineEmits<{
 
 const message = useMessage()
 const router = useRouter()
+const authStore = useAuthStore()
 
 // AI 工具组件引用（用于以编程方式触发各组件内部按钮）
 const llmRef = ref<{ $el: HTMLElement } | null>(null)
@@ -127,6 +145,18 @@ function handleAiToolSelect(key: string) {
     llmRef.value?.$el?.querySelector('button')?.click()
   } else if (key === 'plaza') {
     plazaRef.value?.$el?.querySelector('button')?.click()
+  }
+}
+
+/** 用户菜单 */
+const userMenuOptions = [
+  { label: '退出登录', key: 'logout' },
+]
+
+function handleUserMenuSelect(key: string) {
+  if (key === 'logout') {
+    authStore.logout()
+    router.push('/login')
   }
 }
 
@@ -476,6 +506,34 @@ onMounted(loadStats)
   opacity: 1;
   background: rgba(255, 255, 255, 0.16);
   transform: rotate(45deg);
+}
+
+/* 用户菜单触发按钮 */
+.user-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  opacity: 0.9;
+  transition: all 0.18s ease;
+  border-radius: var(--app-radius-sm);
+  color: inherit;
+  user-select: none;
+}
+
+.user-trigger:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.user-name {
+  font-size: 13px;
+  font-weight: 600;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dropdown-item-icon {

@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS novels (
     title TEXT NOT NULL,
     slug TEXT UNIQUE NOT NULL,
     author TEXT DEFAULT '未知作者',
+    user_id TEXT DEFAULT NULL,
     target_chapters INTEGER NOT NULL DEFAULT 0,
     premise TEXT DEFAULT '',
     autopilot_status TEXT DEFAULT 'stopped',
@@ -912,4 +913,19 @@ CREATE INDEX IF NOT EXISTS idx_dag_versions_novel ON dag_versions(novel_id);
 CREATE INDEX IF NOT EXISTS idx_dag_versions_novel_version ON dag_versions(novel_id, version);
 -- 索引：按更新时间排序（用于清理旧版本）
 CREATE INDEX IF NOT EXISTS idx_dag_versions_updated_at ON dag_versions(novel_id, updated_at DESC);
+
+-- 用户表（RBAC 权限管理）
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'user',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+
+-- novels.user_id 外键索引
+CREATE INDEX IF NOT EXISTS idx_novels_user_id ON novels(user_id);
 

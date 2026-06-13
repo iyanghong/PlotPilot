@@ -178,6 +178,9 @@ def create_app(app_settings: BackendSettings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(lifespan_app: FastAPI):
         _get_lifecycle().startup(len(lifespan_app.routes))
+        # RBAC: 每次启动确保默认管理员账户存在
+        from interfaces.api.dependencies import _ensure_builtin_admin
+        _ensure_builtin_admin()
         try:
             yield
         finally:

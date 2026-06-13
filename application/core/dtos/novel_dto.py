@@ -88,6 +88,7 @@ class NovelDTO:
     locked_special_requirements: str = ""
     target_words_per_chapter: int = 2500
     generation_prefs: Dict[str, Any] = field(default_factory=dict)
+    user_id: Optional[str] = None
 
     @classmethod
     def from_domain(cls, novel: 'Novel') -> 'NovelDTO':
@@ -139,4 +140,5 @@ class NovelDTO:
             locked_special_requirements=gp_locked_special_requirements,
             target_words_per_chapter=int(getattr(novel, "target_words_per_chapter", 2500) or 2500),
             generation_prefs=gp_dict,
+            user_id=getattr(novel, "user_id", None),
         )

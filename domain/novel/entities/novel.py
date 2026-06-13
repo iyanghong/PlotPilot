@@ -70,6 +70,8 @@ class Novel(BaseEntity):
         # 审计进度指示
         audit_progress: Optional[str] = None,
         generation_prefs: Optional[GenerationPreferences] = None,
+        # RBAC 用户隔离
+        user_id: Optional[str] = None,
     ):
         super().__init__(id.value)
         self.novel_id = id
@@ -116,6 +118,7 @@ class Novel(BaseEntity):
         # 审计进度指示
         self.audit_progress = audit_progress
         self.generation_prefs = generation_prefs or GenerationPreferences()
+        self.user_id = user_id  # RBAC: 所属用户 ID
 
     def add_chapter(self, chapter: Chapter) -> None:
         """添加章节（必须连续）"""

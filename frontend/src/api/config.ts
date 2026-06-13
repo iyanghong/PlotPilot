@@ -268,6 +268,11 @@ function formatAxiosUserSummary(err: AxiosError): string {
 
 axiosInstance.interceptors.request.use(async config => {
   await ensureTauriBackendReady()
+  // RBAC: 附加 JWT Token（从 localStorage 读取，避免循环依赖 Pinia store）
+  const token = localStorage.getItem('plotpilot_token')
+  if (token) {
+    config.headers.set('Authorization', `Bearer ${token}`)
+  }
   return config
 })
 

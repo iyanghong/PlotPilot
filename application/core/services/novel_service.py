@@ -160,6 +160,7 @@ class NovelService:
         special_requirements: str = "",
         length_tier: Optional[str] = None,
         target_words_per_chapter: Optional[int] = None,
+        user_id: Optional[str] = None,
     ) -> NovelDTO:
         """创建新小说
 
@@ -209,6 +210,7 @@ class NovelService:
                 locked_writing_style=str(writing_style or "").strip(),
                 locked_special_requirements=str(special_requirements or "").strip(),
             ),
+            user_id=user_id,
         )
 
         self.novel_repository.save(novel)
@@ -263,6 +265,24 @@ class NovelService:
             NovelDTO 列表
         """
         novels = self.novel_repository.list_all()
+        dtos = []
+        for novel in novels:
+            dto = NovelDTO.from_domain(self._hydrate_chapters(novel))
+            dto.has_bible = self._check_has_bible(novel.novel_id.value)
+            dto.has_outline = self._check_has_outline(novel.novel_id.value)
+            dtos.append(dto)
+        return dtos
+
+    def list_novels_for_user(self, user_id: str) -> List[NovelDTO]:
+        """列出指定用户的小说（RBAC 用户隔离）
+
+        Args:
+            user_id: 用户 ID
+
+        Returns:
+            NovelDTO 列表
+        """
+        novels = self.novel_repository.list_by_user(user_id)
         dtos = []
         for novel in novels:
             dto = NovelDTO.from_domain(self._hydrate_chapters(novel))

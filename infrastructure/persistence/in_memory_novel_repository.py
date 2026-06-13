@@ -42,6 +42,28 @@ class InMemoryNovelRepository(NovelRepository):
         if novel_id.value in self._storage:
             del self._storage[novel_id.value]
 
+    def list_by_user(self, user_id: str) -> List[Novel]:
+        """列出指定用户的全部小说"""
+        return [
+            novel for novel in self._storage.values()
+            if getattr(novel, "user_id", None) == user_id
+        ]
+
+    def get_by_id_and_user(self, novel_id: NovelId, user_id: str) -> Optional[Novel]:
+        """根据 ID 和用户 ID 获取小说"""
+        novel = self._storage.get(novel_id.value)
+        if novel and getattr(novel, "user_id", None) == user_id:
+            return novel
+        return None
+
+    def patch(self, novel_id: NovelId, **fields) -> None:
+        """增量更新小说字段"""
+        novel = self._storage.get(novel_id.value)
+        if novel is None:
+            return
+        for key, value in fields.items():
+            setattr(novel, key, value)
+
     def exists(self, novel_id: NovelId) -> bool:
         """检查小说是否存在"""
         return novel_id.value in self._storage
