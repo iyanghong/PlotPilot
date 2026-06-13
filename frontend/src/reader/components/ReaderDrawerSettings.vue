@@ -146,7 +146,7 @@ const fontOptions = [
   { label: '宋体', value: 'serif' },
   { label: '楷体', value: 'kai' },
   { label: '黑体', value: 'hei' },
-]
+] as const
 
 /** 更新单个设置项并通知父组件 */
 function update<K extends keyof ReaderSettings>(key: K, value: ReaderSettings[K]) {
