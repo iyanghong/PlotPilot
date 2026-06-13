@@ -59,7 +59,8 @@ const isActive = computed(() => props.visible || isHovering.value)
   background: transparent;
   border-top: 1px solid transparent;
   color: #5c4a3a;
-  opacity: 0.35;
+  opacity: 0;
+  pointer-events: none;
   transition: background 0.4s ease, opacity 0.4s ease, border-color 0.4s ease;
 }
 
@@ -67,6 +68,7 @@ const isActive = computed(() => props.visible || isHovering.value)
   background: #f0ece6;
   border-top-color: #e0d8cc;
   opacity: 1;
+  pointer-events: auto;
 }
 
 .bottom-btn {
