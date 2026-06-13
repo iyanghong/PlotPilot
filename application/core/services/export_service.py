@@ -35,9 +35,13 @@ def _novel_id_str(novel: Novel) -> str:
 
 
 def _chapter_display_title(ch: Chapter) -> str:
-    if ch.title and str(ch.title).strip():
-        return str(ch.title).strip()
-    return f"第 {ch.number} 章"
+    """始终带「第xx章」前缀"""
+    title = (ch.title or "").strip()
+    if title and not title.startswith("第"):
+        return f"第{ch.number}章 {title}"
+    if title:
+        return title
+    return f"第{ch.number}章"
 
 
 def _content_to_html_paragraphs(text: str) -> str:
@@ -83,6 +87,8 @@ class ExportService:
                 result = self._export_to_docx(novel, chapters)
             elif format == "markdown":
                 result = self._export_to_markdown(novel, chapters)
+            elif format == "txt":
+                result = self._export_to_txt(novel, chapters)
             else:
                 raise ValueError(f"不支持的导出格式: {format}")
             logger.info("导出成功，%s 字节", len(result[0]))
@@ -111,10 +117,12 @@ class ExportService:
                 result = self._export_to_docx(novel, [chapter])
             elif format == "markdown":
                 result = self._export_to_markdown(novel, [chapter])
+            elif format == "txt":
+                result = self._export_to_txt(novel, [chapter])
             else:
                 raise ValueError(f"不支持的导出格式: {format}")
             data, mime, _ = result
-            ext = {"epub": "epub", "pdf": "pdf", "docx": "docx", "markdown": "md"}[format]
+            ext = {"epub": "epub", "pdf": "pdf", "docx": "docx", "markdown": "md", "txt": "txt"}[format]
             chapter_stem = _safe_filename_stem(
                 f"{novel.title or 'novel'}-第{chapter.number}章"
             )
@@ -299,3 +307,25 @@ class ExportService:
         text = "\n".join(lines)
         stem = _safe_filename_stem(novel.title)
         return text.encode("utf-8"), "text/markdown; charset=utf-8", f"{stem}.md"
+
+    def _export_to_txt(self, novel: Novel, chapters: list[Chapter]) -> Tuple[bytes, str, str]:
+        """导出为纯文本"""
+        lines: List[str] = [
+            f"{novel.title or '未命名'}",
+            f"作者：{novel.author or '—'}",
+            "",
+            f"简介：{(novel.premise or '').strip() or '（无）'}",
+            "",
+            "=" * 40,
+            "",
+        ]
+        for ch in chapters:
+            lines.append(_chapter_display_title(ch))
+            lines.append("")
+            lines.append((ch.content or "").strip() or "（无正文）")
+            lines.append("")
+            lines.append("-" * 30)
+            lines.append("")
+        text = "\n".join(lines)
+        stem = _safe_filename_stem(novel.title)
+        return text.encode("utf-8"), "text/plain; charset=utf-8", f"{stem}.txt"

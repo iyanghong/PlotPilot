@@ -135,7 +135,8 @@ const exportOptions = [
   { label: '📱 EPUB (电子书)', key: 'epub' },
   { label: '📄 PDF (打印)', key: 'pdf' },
   { label: '📝 DOCX (Word)', key: 'docx' },
-  { label: '📋 Markdown', key: 'markdown' }
+  { label: '📋 Markdown', key: 'markdown' },
+  { label: '📄 TXT (纯文本)', key: 'txt' }
 ]
 
 async function handleExport(format: string) {

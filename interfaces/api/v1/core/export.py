@@ -36,10 +36,10 @@ async def export_novel(
     """
     try:
         # 验证格式
-        valid_formats = ["epub", "pdf", "docx", "markdown"]
+        valid_formats = ["epub", "pdf", "docx", "markdown", "txt"]
         if format not in valid_formats:
             raise HTTPException(status_code=400, detail=f"不支持的导出格式: {format}")
-        
+
         # 执行导出
         file_content, media_type, filename = export_service.export_novel(novel_id, format)
         
@@ -81,7 +81,7 @@ async def export_chapter(
     """
     try:
         # 验证格式
-        valid_formats = ["epub", "pdf", "docx", "markdown"]
+        valid_formats = ["epub", "pdf", "docx", "markdown", "txt"]
         if format not in valid_formats:
             raise HTTPException(status_code=400, detail=f"不支持的导出格式: {format}")
 
