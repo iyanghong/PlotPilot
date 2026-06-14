@@ -1,6 +1,7 @@
 <template>
   <div class="home">
     <StatsSidebar
+      v-if="!isMobile"
       @create-book="focusCreateInput"
       @refresh-list="handleRefreshList"
       @collapsed-change="handleSidebarCollapsedChange"
@@ -62,6 +63,12 @@
                   <n-icon><component :is="showAdvanced ? IconChevronUp : IconChevronDown" /></n-icon>
                 </template>
                 {{ showAdvanced ? '收起高级' : '高级（自定义章数/每章字数）' }}
+              </n-button>
+              <n-button text type="info" @click="showInspireAssistant = true" style="margin-left: 8px">
+                <template #icon>
+                  <n-icon><IconBulb /></n-icon>
+                </template>
+                灵感助手
               </n-button>
             </div>
 
@@ -427,6 +434,14 @@
         </div>
       </div>
     </n-modal>
+
+    <!-- 灵感助手弹窗 -->
+    <InspirationAssistantModal
+      v-if="showInspireAssistant"
+      :show="showInspireAssistant"
+      :novel-id="'__preview__'"
+      @fill-fields="handleInspireFill"
+    />
   </div>
 </template>
 
@@ -437,6 +452,7 @@ import { NDropdown, useMessage, NIcon } from 'naive-ui'
 import { novelApi, type NovelDTO } from '../api/novel'
 import { isWizardCompleted } from '@/utils/wizardStageCache'
 import StatsSidebar from '@/components/stats/StatsSidebar.vue'
+import { useIsMobile } from '@/composables/useIsMobile'
 import { useAppSettingsShellStore } from '@/stores/appSettingsShellStore'
 import { useAuthStore } from '@/stores/authStore'
 import { parseGenreWorldFromPremise } from '@/utils/premisePresets'
@@ -457,11 +473,18 @@ const MarketTaxonomyPicker = defineAsyncComponent(
 const NovelSetupGuide = defineAsyncComponent(
   () => import('@/components/onboarding/NovelSetupGuide.vue'),
 )
+const InspirationAssistantModal = defineAsyncComponent(
+  () => import('@/components/inspiration/InspirationAssistantModal.vue'),
+)
 
 // Icons
 const IconSpark = () =>
   h('svg', { xmlns: 'http://www.w3.org/2000/svg', viewBox: '0 0 24 24', width: '1em', height: '1em' },
     h('path', { fill: 'currentColor', d: 'M13 2L3 14h8l-1 8 10-12h-8l1-8z' }))
+
+const IconBulb = () =>
+  h('svg', { xmlns: 'http://www.w3.org/2000/svg', viewBox: '0 0 24 24', width: '1em', height: '1em' },
+    h('path', { fill: 'currentColor', d: 'M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7zm2.85 11.1l-.85.6V16h-4v-2.3l-.85-.6A4.997 4.997 0 0 1 7 9c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.63-.8 3.16-2.15 4.1z' }))
 
 const IconSearch = () =>
   h('svg', { xmlns: 'http://www.w3.org/2000/svg', viewBox: '0 0 24 24', width: '1em', height: '1em' },
@@ -500,6 +523,7 @@ interface BookListItem {
 const router = useRouter()
 const message = useMessage()
 const statsStore = useStatsStore()
+const { isMobile } = useIsMobile()
 const appSettingsShell = useAppSettingsShellStore()
 const authStore = useAuthStore()
 
@@ -517,6 +541,7 @@ function handleUserMenuSelect(key: string) {
 
 const createInputRef = ref<any>(null)
 const showAdvanced = ref(false)
+const showInspireAssistant = ref(false)
 const creating = ref(false)
 const loading = ref(false)
 
@@ -782,6 +807,24 @@ const handleBatchDelete = async () => {
   } finally {
     batchDeleting.value = false
   }
+}
+
+/** 灵感助手字段填充处理 */
+function handleInspireFill(fields: Record<string, string>) {
+  if (!fields || Object.keys(fields).length === 0) {
+    showInspireAssistant.value = false
+    return
+  }
+  if (fields.title) newBook.value.title = fields.title
+  if (fields.premise) newBook.value.premise = fields.premise
+  if (fields.genre) newBook.value.genre = fields.genre
+  if (fields.world_preset) newBook.value.worldPreset = fields.world_preset
+  if (fields.story_structure) newBook.value.storyStructure = fields.story_structure
+  if (fields.pacing_control) newBook.value.pacingControl = fields.pacing_control
+  if (fields.writing_style) newBook.value.writingStyle = fields.writing_style
+  if (fields.special_requirements) newBook.value.specialRequirements = fields.special_requirements
+  showInspireAssistant.value = false
+  message.success('已填充灵感助手生成的内容，可继续修改后创建')
 }
 
 const focusCreateInput = () => {
