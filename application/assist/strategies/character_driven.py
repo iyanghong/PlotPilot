@@ -36,7 +36,7 @@ class CharacterDrivenStrategy(BaseInspirationStrategy):
             f'{{"title": "建议的书名", "premise": "200字以内的核心梗概（从角色出发推导）", '
             f'"genre": "大类/细分主题", '
             f'"worldPreset": "世界观基调描述（与角色匹配）", '
-            f'"storyStructure": "建议的剧情结构（配适角色成长弧）", '
+            f'"storyStructure": "建议的剧情结构（适配角色成长弧）", '
             f'"pacingControl": "节奏把控建议", '
             f'"writingStyle": "建议的写作风格", '
             f'"specialRequirements": "特殊要求或注意事项"}}\n\n'
