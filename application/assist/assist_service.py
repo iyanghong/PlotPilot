@@ -162,10 +162,15 @@ class AssistService:
         strategy = _get_strategy(session.strategy.value)
         conversation = _build_conversation_text(history)
 
-        # generate() 接受 str 类型，传递字段提取 prompt 即可
-        # 策略的系统 prompt 由 generate() 内部的默认系统提示词替代
+        # 使用 stream_generate 收集完整结果，以确保策略的系统提示词生效
         extraction_prompt = strategy.build_field_extraction_prompt(conversation)
-        raw = await self._llm.generate(extraction_prompt)
+        prompt = Prompt(
+            system=strategy.build_system_prompt(),
+            user=extraction_prompt,
+        )
+        raw = ""
+        async for chunk in self._llm.stream_generate(prompt):
+            raw += chunk
 
         # 解析 JSON（清洗可能的 markdown 代码块包裹）
         raw = raw.strip()
