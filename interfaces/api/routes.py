@@ -46,6 +46,7 @@ def _include_registered_routes(
 def register_api_routes(app: FastAPI) -> None:
     """Register all backend routes without changing public prefixes."""
     from interfaces.api.v1 import anti_ai as anti_ai_routes
+    from interfaces.api.v1.assist import inspire_routes as assist_routes
     from interfaces.api.v1 import auth as auth_routes
     from interfaces.api.v1 import reader as reader_module
     from interfaces.api.v1 import system as system_routes
@@ -148,6 +149,7 @@ def register_api_routes(app: FastAPI) -> None:
             RouterRegistration(llm_control.router, API_V1_PREFIX),
             RouterRegistration(auth_routes.router, API_V1_PREFIX),
             RouterRegistration(anti_ai_routes.router, API_V1_PREFIX),
+            RouterRegistration(assist_routes.router, API_V1_PREFIX),
         ),
     )
 
