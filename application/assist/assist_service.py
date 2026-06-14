@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
 import uuid
 from typing import AsyncIterator, List, Optional
+
+logger = logging.getLogger(__name__)
 
 from domain.ai.value_objects.prompt import Prompt
 from domain.assist.entities import (
     InspireSession,
     InspireMessage,
     InspirationStrategy,
-    SessionStatus,
     InspireFieldData,
 )
 from domain.assist.repository import InspireRepository
@@ -91,6 +94,33 @@ class AssistService:
         """获取会话的全部消息"""
         return await self._repo.get_messages(session_id)
 
+    # ---- helpers ----
+
+    @staticmethod
+    def _parse_json_response(raw: str) -> dict:
+        """从 LLM 原始输出中提取 JSON，容忍 markdown 代码块包裹"""
+        text = raw.strip()
+        # 移除 markdown 代码块标记（```json 或 ```）
+        if text.startswith("```"):
+            # 去掉首行 ```json 或 ```
+            text = text.split("\n", 1)[-1] if "\n" in text else text[3:]
+            # 去掉尾部 ```
+            if text.rstrip().endswith("```"):
+                text = text.rstrip()[:-3]
+            text = text.strip()
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            # 尝试用正则提取 JSON 对象
+            match = re.search(r"\{[^{}]*\}", text, re.DOTALL)
+            if match:
+                try:
+                    return json.loads(match.group())
+                except json.JSONDecodeError:
+                    pass
+            logger.warning("无法解析 LLM JSON 输出: %.200s...", raw)
+            return {}
+
     # ---- chat ----
 
     async def chat(
@@ -107,7 +137,7 @@ class AssistService:
         Yields:
             AI 回复的文本片段（逐 token 输出）
         """
-        # 1. 保存用户消息
+        # 1. 保存用户消息（确保在构建上下文之前持久化）
         user_msg = InspireMessage(
             id=f"msg_{uuid.uuid4().hex[:12]}",
             session_id=session.id,
@@ -130,18 +160,23 @@ class AssistService:
 
         # 3. 流式生成
         full_content = ""
-        async for chunk in self._llm.stream_generate(prompt):
-            full_content += chunk
-            yield chunk
+        try:
+            async for chunk in self._llm.stream_generate(prompt):
+                full_content += chunk
+                yield chunk
+        except Exception:
+            logger.exception("chat 流式生成失败 session=%s", session.id)
+            raise
 
-        # 4. 保存 AI 回复
-        ai_msg = InspireMessage(
-            id=f"msg_{uuid.uuid4().hex[:12]}",
-            session_id=session.id,
-            role="assistant",
-            content=full_content,
-        )
-        await self._repo.add_message(ai_msg)
+        # 4. 保存 AI 回复（仅在流式成功完成后）
+        if full_content:
+            ai_msg = InspireMessage(
+                id=f"msg_{uuid.uuid4().hex[:12]}",
+                session_id=session.id,
+                role="assistant",
+                content=full_content,
+            )
+            await self._repo.add_message(ai_msg)
 
     # ---- field extraction ----
 
@@ -173,15 +208,7 @@ class AssistService:
             raw += chunk
 
         # 解析 JSON（清洗可能的 markdown 代码块包裹）
-        raw = raw.strip()
-        if raw.startswith("```"):
-            # 移除 markdown 代码块标记
-            raw = raw.split("\n", 1)[-1]
-            if raw.endswith("```"):
-                raw = raw[:-3]
-            raw = raw.strip()
-
-        data = json.loads(raw)
+        data = self._parse_json_response(raw)
 
         fields = InspireFieldData(
             title=data.get("title", ""),
