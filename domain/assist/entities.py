@@ -2,7 +2,8 @@
 """灵感助手领域实体 — 作者：Axelton"""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -41,7 +42,6 @@ class InspireSession(BaseEntity):
     def complete(self) -> None:
         """标记会话完成"""
         self.status = SessionStatus.COMPLETED
-        from datetime import datetime, timezone
         self.updated_at = datetime.now(timezone.utc)
 
 
