@@ -114,7 +114,10 @@ async def process_novel(host: Any, novel: Novel) -> None:
 
         host._merge_autopilot_status_from_db(novel)
         if novel.autopilot_status == AutopilotStatus.RUNNING:
-            if host.circuit_breaker:
+            cb = host._get_circuit_breaker(novel.novel_id.value) if hasattr(host, '_get_circuit_breaker') else None
+            if cb:
+                cb.record_success()
+            elif host.circuit_breaker:
                 host.circuit_breaker.record_success()
             novel.consecutive_error_count = 0
         else:
@@ -135,7 +138,10 @@ async def process_novel(host: Any, novel: Novel) -> None:
             host._save_novel_state(novel)
             return
 
-        if host.circuit_breaker:
+        cb = host._get_circuit_breaker(novel.novel_id.value) if hasattr(host, '_get_circuit_breaker') else None
+        if cb:
+            cb.record_failure()
+        elif host.circuit_breaker:
             host.circuit_breaker.record_failure()
         novel.consecutive_error_count = (novel.consecutive_error_count or 0) + 1
 

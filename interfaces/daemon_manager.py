@@ -201,10 +201,38 @@ def run_autopilot_daemon_process(
 
                 active_novels = daemon._get_active_novels()
                 if active_novels:
-                    for novel in active_novels:
+                    # 并行调度：每本小说独立 asyncio.Task，Semaphore 控制槽位
+                    max_concurrent = int(
+                        os.getenv("AUTOPILOT_MAX_CONCURRENT_NOVELS", "3")
+                    )
+                    semaphore = asyncio.Semaphore(max_concurrent)
+
+                    async def _process_one(novel):
+                        nid = (
+                            getattr(getattr(novel, "novel_id", None), "value", None)
+                            or str(novel)
+                        )
                         if stop_event.is_set():
-                            break
-                        loop.run_until_complete(daemon._process_novel(novel))
+                            return
+                        async with semaphore:
+                            if stop_event.is_set():
+                                return
+                            process_logger.debug("[%s] 获取处理槽位，开始本轮", nid)
+                            try:
+                                await daemon._process_novel(novel)
+                            except Exception as exc:
+                                process_logger.error(
+                                    "[%s] 处理异常: %s", nid, exc, exc_info=True
+                                )
+
+                    async def _run_parallel():
+                        tasks = [
+                            asyncio.create_task(_process_one(novel))
+                            for novel in active_novels
+                        ]
+                        await asyncio.gather(*tasks, return_exceptions=True)
+
+                    loop.run_until_complete(_run_parallel())
 
                 stop_event.wait(timeout=daemon.poll_interval)
 
