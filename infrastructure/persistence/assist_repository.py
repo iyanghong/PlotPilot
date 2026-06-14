@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 from domain.assist.entities import (
     InspireSession,
@@ -58,11 +61,21 @@ class SqliteAssistRepository(InspireRepository):
     # ---- session helpers ----
 
     def _row_to_session(self, row: dict) -> InspireSession:
+        try:
+            strategy = InspirationStrategy(row["strategy"])
+        except ValueError:
+            logger.warning("assist_sessions %s 策略值无效: %s，回退为 brainstorm", row["id"], row.get("strategy"))
+            strategy = InspirationStrategy.BRAINSTORM
+        try:
+            status = SessionStatus(row["status"])
+        except ValueError:
+            logger.warning("assist_sessions %s 状态值无效: %s，回退为 active", row["id"], row.get("status"))
+            status = SessionStatus.ACTIVE
         session = InspireSession(
             id=row["id"],
             novel_id=row["novel_id"],
-            strategy=InspirationStrategy(row["strategy"]),
-            status=SessionStatus(row["status"]),
+            strategy=strategy,
+            status=status,
         )
         session.created_at = datetime.fromisoformat(row["created_at"])
         session.updated_at = datetime.fromisoformat(row["updated_at"])
