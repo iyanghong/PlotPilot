@@ -38,6 +38,9 @@ export interface AssistChatHandlers {
   onChatDone?: (messageId: string) => void
   onFieldsDone?: (fields: AssistFieldData) => void
   onResumeDone?: (data: AssistResumeData) => void
+  onConnected?: () => void
+  onDisconnected?: () => void
+  onStreamEnd?: () => void
   onError?: (error: string) => void
 }
 
@@ -60,21 +63,29 @@ export function subscribeAssist(
   void (async () => {
     try {
       const url = resolveHttpUrl('/api/v1/assist/inspire')
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+      }
+      const token = localStorage.getItem('plotpilot_token')
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`
+      }
       const res = await fetch(url, {
         method: 'POST',
         signal: ctrl.signal,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-        },
+        headers,
         body: JSON.stringify(body),
       })
 
       if (!res.ok || !res.body) {
         handlers.onError?.(`HTTP ${res.status}`)
+        handlers.onDisconnected?.()
         return
       }
+
+      handlers.onConnected?.()
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
@@ -143,9 +154,11 @@ export function subscribeAssist(
           break
         }
       }
+      handlers.onStreamEnd?.()
     } catch (e) {
       if (e instanceof Error && e.name === 'AbortError') return
       handlers.onError?.(e instanceof Error ? e.message : '流连接异常')
+      handlers.onDisconnected?.()
     }
   })()
 
