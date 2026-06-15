@@ -1,6 +1,45 @@
 <template>
-  <div class="workbench">
+  <!-- 移动端布局 -->
+  <div v-if="isMobile" class="workbench workbench-mobile">
+    <MobileShell
+      :slug="slug"
+      :book-title="bookTitle"
+      :chapters="chapters"
+      :current-chapter-id="currentChapterId"
+      :chapter-content="chapterContent"
+      :chapter-loading="chapterLoading"
+      :generation-prefs="generationPrefs"
+      @chapter-updated="handleChapterUpdated"
+      @select-chapter="handleChapterSelect"
+      @go-home="goHome"
+    />
+  </div>
+
+  <!-- 桌面端布局 -->
+  <div v-else class="workbench">
     <StatsTopBar :slug="slug" @open-settings="appSettingsShell.open()" />
+
+    <div class="wb-backup-actions">
+      <n-button
+        size="tiny"
+        quaternary
+        :loading="exporting"
+        @click="handleExportBackup"
+      >
+        <template #icon><n-icon :component="DownloadOutline" /></template>
+        备份
+      </n-button>
+      <n-upload
+        :show-file-list="false"
+        accept=".zip"
+        @change="handleImportBackup"
+      >
+        <n-button size="tiny" quaternary :loading="importing">
+          <template #icon><n-icon :component="UploadOutline" /></template>
+          还原
+        </n-button>
+      </n-upload>
+    </div>
 
     <n-spin :show="pageLoading" class="workbench-spin" description="加载工作台…">
       <div class="workbench-inner">
@@ -84,8 +123,12 @@
 import { onMounted, onUnmounted, computed, ref, watch, defineAsyncComponent, type ComponentPublicInstance } from 'vue'
 import { useRoute } from 'vue-router'
 import { useMessage } from 'naive-ui'
+import { DownloadOutline, UploadOutline } from '@vicons/ionicons5'
+import { downloadBackup, uploadBackup } from '@/api/backup'
+import { useIsMobile } from '../composables/useIsMobile'
 import { useDebouncedTask } from '../composables/useDebouncedTask'
 import { useWorkbench } from '../composables/useWorkbench'
+import MobileShell from '../views/mobile/MobileShell.vue'
 import { useStatsStore } from '../stores/statsStore'
 import { useWorkbenchRefreshStore } from '../stores/workbenchRefreshStore'
 import { useAppSettingsShellStore } from '../stores/appSettingsShellStore'
@@ -106,8 +149,39 @@ import { readStorageBoolean, writeStorageBoolean } from '@/utils/storage'
 
 const ActPlanningModal = defineAsyncComponent(() => import('../components/workbench/ActPlanningModal.vue'))
 
+const { isMobile } = useIsMobile()
 const route = useRoute()
 const message = useMessage()
+
+const exporting = ref(false)
+const importing = ref(false)
+
+async function handleExportBackup() {
+  exporting.value = true
+  try {
+    await downloadBackup(slug.value)
+    message.success('备份导出完成')
+  } catch (e: any) {
+    message.error(e?.message || '导出失败')
+  } finally {
+    exporting.value = false
+  }
+}
+
+async function handleImportBackup({ file }: { file: any }) {
+  importing.value = true
+  try {
+    const result = await uploadBackup(slug.value, (file as any).file as File)
+    message.success(
+      `还原完成：${result.stats.tables} 张表，${result.stats.total_rows} 行数据`,
+    )
+  } catch (e: any) {
+    message.error(e?.message || '还原失败，请检查文件格式')
+  } finally {
+    importing.value = false
+  }
+}
+
 const statsStore = useStatsStore()
 const workbenchRefresh = useWorkbenchRefreshStore()
 const appSettingsShell = useAppSettingsShellStore()
@@ -368,5 +442,14 @@ watch(
 .wb-right-strip:hover {
   background: var(--plotpilot-panel-muted);
   color: var(--app-text-primary);
+}
+
+.wb-backup-actions {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  display: flex;
+  gap: 4px;
+  z-index: 10;
 }
 </style>
