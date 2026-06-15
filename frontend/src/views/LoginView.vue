@@ -127,7 +127,7 @@ async function handleSubmit() {
       } else {
         localStorage.removeItem(REMEMBER_KEY)
       }
-      const redirect = (route.query.redirect as string) || '/'
+      const redirect = (route.query.redirect as string) || (authStore.isAdmin ? '/admin/dashboard' : '/')
       router.push(redirect)
     } else {
       errorMsg.value = result.error || '登录失败，请检查用户名和密码'

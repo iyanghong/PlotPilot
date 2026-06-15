@@ -39,6 +39,9 @@ export interface DashboardData {
     top_novels_by_characters: Array<{ novel_id: string; title: string; character_count: number }>
     top_novels_by_foreshadows: Array<{ novel_id: string; title: string; foreshadow_count: number }>
   }
+  token_ranking: {
+    top_novels_by_tokens: Array<{ novel_id: string; title: string; total_tokens: number }>
+  }
   system: {
     autopilot_running: number
     autopilot_waiting: number
@@ -60,6 +63,7 @@ export interface UserDTO {
 export interface BookDTO {
   id: string
   title: string
+  slug: string
   author: string
   stage: string
   autopilot_status: string

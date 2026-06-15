@@ -159,16 +159,16 @@ class DashboardService:
         _novel_filter, _params = self._novel_scope_filter(scope, user_id)
         foreshadow = self._db.fetch_one(
             f"""SELECT CASE WHEN COUNT(*) > 0
-                       THEN CAST(SUM(CASE WHEN f.status = 'closed' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)
+                       THEN CAST(SUM(CASE WHEN f.status = 'resolved' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)
                        ELSE 0 END as closure_rate,
-                       COALESCE(SUM(CASE WHEN f.status != 'closed' THEN 1 ELSE 0 END), 0) as open_count
+                       COALESCE(SUM(CASE WHEN f.status != 'resolved' THEN 1 ELSE 0 END), 0) as open_count
                 FROM foreshadows f
                 JOIN novels n ON n.id = f.novel_id
                 WHERE 1=1 {_novel_filter}""",
             _params,
         )
         style = self._db.fetch_one(
-            f"""SELECT COALESCE(AVG(css.overall_score), 0) as avg_score
+            f"""SELECT COALESCE(AVG(css.similarity_score), 0) as avg_score
                 FROM chapter_style_scores css
                 JOIN novels n ON n.id = css.novel_id
                 WHERE 1=1 {_novel_filter}""",
@@ -176,7 +176,7 @@ class DashboardService:
         )
         audit = self._db.fetch_one(
             f"""SELECT CASE WHEN COUNT(*) > 0
-                       THEN CAST(SUM(CASE WHEN cr.passed = 1 THEN 1 ELSE 0 END) AS REAL) / COUNT(*)
+                       THEN CAST(SUM(CASE WHEN cr.status = 'approved' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)
                        ELSE 0 END as pass_rate
                 FROM chapter_reviews cr
                 JOIN novels n ON n.id = cr.novel_id
@@ -224,11 +224,11 @@ class DashboardService:
             _params,
         )
         char_types = self._db.fetch_all(
-            f"""SELECT uc.character_type as type, COUNT(*) as cnt
+            f"""SELECT uc.role as type, COUNT(*) as cnt
                 FROM unified_characters uc
                 JOIN novels n ON n.id = uc.novel_id
                 WHERE 1=1 {_novel_filter}
-                GROUP BY uc.character_type""",
+                GROUP BY uc.role""",
             _params,
         )
         top_chars = self._db.fetch_all(
@@ -260,8 +260,8 @@ class DashboardService:
             "total_foreshadows": overview["total_foreshadows"] if overview else 0,
             "by_status": {
                 "planted": status_map.get("planted", 0),
-                "triggered": status_map.get("triggered", 0),
-                "closed": status_map.get("closed", 0),
+                "triggered": 0,
+                "closed": status_map.get("resolved", 0) + status_map.get("abandoned", 0),
             },
             "character_type_distribution": {
                 "protagonist": type_map.get("protagonist", 0),
@@ -275,6 +275,31 @@ class DashboardService:
             "top_novels_by_foreshadows": [
                 {"novel_id": r["novel_id"], "title": r["title"], "foreshadow_count": r["foreshadow_count"]}
                 for r in top_fores
+            ],
+        }
+
+    # ── Token 消耗排行 ──────────────────────────────
+
+    def get_token_ranking(
+        self, scope: str = "all", user_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        _novel_filter, _params = self._novel_scope_filter(scope, user_id)
+        top_novels = self._db.fetch_all(
+            f"""SELECT n.id as novel_id, n.title,
+                       COALESCE(SUM(json_extract(t.metadata, '$.usage.input_tokens')), 0)
+                       + COALESCE(SUM(json_extract(t.metadata, '$.usage.output_tokens')), 0) as total_tokens
+                FROM ai_trace_spans t
+                JOIN novels n ON n.id = t.novel_id
+                WHERE 1=1 {_novel_filter}
+                GROUP BY n.id
+                ORDER BY total_tokens DESC
+                LIMIT 10""",
+            _params,
+        )
+        return {
+            "top_novels_by_tokens": [
+                {"novel_id": r["novel_id"], "title": r["title"], "total_tokens": r["total_tokens"]}
+                for r in top_novels
             ],
         }
 
@@ -322,6 +347,7 @@ class DashboardService:
             "books": self.get_book_stats(scope, user_id),
             "quality": self.get_quality_stats(scope, user_id),
             "cast_foreshadow": self.get_cast_foreshadow_stats(scope, user_id),
+            "token_ranking": self.get_token_ranking(scope, user_id),
             "system": self.get_system_stats(),
         }
 

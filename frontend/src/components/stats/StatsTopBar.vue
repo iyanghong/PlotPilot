@@ -145,6 +145,7 @@ import { useAuthStore } from '@/stores/authStore'
 
 const props = defineProps<{
   slug: string
+  title?: string
 }>()
 
 defineEmits<{
@@ -173,14 +174,21 @@ function handleAiToolSelect(key: string) {
 }
 
 /** 用户菜单 */
-const userMenuOptions = [
-  { label: '退出登录', key: 'logout' },
-]
+const userMenuOptions = computed(() => {
+  const items: { label: string; key: string }[] = []
+  if (authStore.isAdmin) {
+    items.push({ label: '后台管理', key: 'admin' })
+  }
+  items.push({ label: '退出登录', key: 'logout' })
+  return items
+})
 
 function handleUserMenuSelect(key: string) {
   if (key === 'logout') {
     authStore.logout()
     router.push('/login')
+  } else if (key === 'admin') {
+    router.push('/admin/dashboard')
   }
 }
 
@@ -242,12 +250,15 @@ async function handleExport(format: string) {
   try {
     message.info(`开始导出为 ${format} 格式...`)
     const blob = await novelApi.exportNovel(props.slug, format)
-    
+
+    // 文件名以书名命名，回退到 slug
+    const safeName = (props.title || props.slug).replace(/[<>:"/\\|?*]/g, '_').replace(/\s+/g, '_').slice(0, 80)
+
     // 创建下载链接
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `novel-${props.slug}.${format}`
+    a.download = `${safeName}.${format}`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)

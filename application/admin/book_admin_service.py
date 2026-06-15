@@ -53,6 +53,17 @@ class BookAdminService:
         start = (page - 1) * page_size
         page_novels = novels[start:start + page_size]
 
+        # 批量加载 slug（Novel 实体不持有 slug，直接从表读取）
+        novel_ids = [n.novel_id.value for n in page_novels]
+        slug_map = {}
+        if novel_ids:
+            placeholders = ",".join(["?" for _ in novel_ids])
+            slug_rows = self._db.fetch_all(
+                f"SELECT id, slug FROM novels WHERE id IN ({placeholders})",
+                tuple(novel_ids),
+            )
+            slug_map = {r["id"]: r["slug"] for r in slug_rows}
+
         data = []
         for n in page_novels:
             stats = self._db.fetch_one(
@@ -64,6 +75,7 @@ class BookAdminService:
             data.append({
                 "id": n.novel_id.value,
                 "title": n.title,
+                "slug": slug_map.get(n.novel_id.value, n.novel_id.value),
                 "author": n.author,
                 "stage": n.current_stage.value,
                 "autopilot_status": n.autopilot_status.value if n.autopilot_status else "stopped",

@@ -9,6 +9,7 @@ import AiUsagePanel from './components/AiUsagePanel.vue'
 import UserBookPanel from './components/UserBookPanel.vue'
 import QualityPanel from './components/QualityPanel.vue'
 import CharacterForeshadowPanel from './components/CharacterForeshadowPanel.vue'
+import TokenRankingPanel from './components/TokenRankingPanel.vue'
 import SystemPanel from './components/SystemPanel.vue'
 
 const authStore = useAuthStore()
@@ -39,6 +40,7 @@ onMounted(async () => {
         <UserBookPanel :data="dashboardData.books" />
         <QualityPanel :data="dashboardData.quality" />
         <CharacterForeshadowPanel :data="dashboardData.cast_foreshadow" />
+        <TokenRankingPanel :data="dashboardData.token_ranking" />
         <SystemPanel :data="dashboardData.system" />
       </div>
     </n-spin>
@@ -51,7 +53,7 @@ onMounted(async () => {
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
 }
-@media (max-width: 1200px) {
+@media (max-width: 1599px) {
   .dashboard-grid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 767px) {

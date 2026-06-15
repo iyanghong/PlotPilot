@@ -8,10 +8,12 @@ import { LineChart, BarChart, PieChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import StatCard from './StatCard.vue'
+import { useIsMobile } from '@/composables/useIsMobile'
 import type { DashboardData } from '@/api/admin'
 
 use([LineChart, BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
+const { isMobile } = useIsMobile()
 const props = defineProps<{ data: DashboardData['writing'] }>()
 
 const dailyTrendOption = computed(() => ({
@@ -25,12 +27,12 @@ const dailyTrendOption = computed(() => ({
 
 <template>
   <n-card title="写作产出" size="small" embedded>
-    <n-grid :cols="4" :x-gap="12">
+    <n-grid :cols="isMobile ? 2 : 4" :x-gap="12">
       <n-gi><StatCard label="总字数" :value="data.total_words.toLocaleString()" unit="字" color="#1677ff" /></n-gi>
       <n-gi><StatCard label="总章节" :value="data.total_chapters" color="#52c41a" /></n-gi>
       <n-gi><StatCard label="完本" :value="data.completed_novels" unit="本" color="#722ed1" /></n-gi>
       <n-gi><StatCard label="平均章节" :value="data.avg_words_per_chapter" unit="字/章" color="#fa8c16" /></n-gi>
     </n-grid>
-    <v-chart style="height:260px;margin-top:16px" :option="dailyTrendOption" autoresize />
+    <v-chart :style="{ height: isMobile ? '180px' : '260px', marginTop: '16px' }" :option="dailyTrendOption" autoresize />
   </n-card>
 </template>

@@ -8,10 +8,12 @@ import { LineChart, BarChart, PieChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import StatCard from './StatCard.vue'
+import { useIsMobile } from '@/composables/useIsMobile'
 import type { DashboardData } from '@/api/admin'
 
 use([LineChart, BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
+const { isMobile } = useIsMobile()
 const props = defineProps<{ data: DashboardData['ai_usage'] }>()
 
 const trendOption = computed(() => ({
@@ -35,15 +37,15 @@ const modelPieOption = computed(() => ({
 
 <template>
   <n-card title="AI 调用" size="small" embedded>
-    <n-grid :cols="4" :x-gap="12">
+    <n-grid :cols="isMobile ? 2 : 4" :x-gap="12">
       <n-gi><StatCard label="今日调用" :value="data.today_calls" color="#1677ff" /></n-gi>
       <n-gi><StatCard label="今日 Token" :value="data.today_tokens.toLocaleString()" color="#52c41a" /></n-gi>
       <n-gi><StatCard label="总调用" :value="data.total_calls.toLocaleString()" color="#722ed1" /></n-gi>
       <n-gi><StatCard label="平均延迟" :value="data.avg_latency_ms" unit="ms" color="#fa8c16" /></n-gi>
     </n-grid>
-    <n-grid :cols="2" style="margin-top:16px">
-      <n-gi><v-chart style="height:240px" :option="trendOption" autoresize /></n-gi>
-      <n-gi><v-chart style="height:240px" :option="modelPieOption" autoresize /></n-gi>
+    <n-grid :cols="isMobile ? 1 : 2" style="margin-top:16px">
+      <n-gi><v-chart :style="{ height: isMobile ? '180px' : '240px' }" :option="trendOption" autoresize /></n-gi>
+      <n-gi><v-chart :style="{ height: isMobile ? '180px' : '240px' }" :option="modelPieOption" autoresize /></n-gi>
     </n-grid>
   </n-card>
 </template>

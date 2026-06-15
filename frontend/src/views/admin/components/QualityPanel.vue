@@ -8,10 +8,12 @@ import { GaugeChart, PieChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import StatCard from './StatCard.vue'
+import { useIsMobile } from '@/composables/useIsMobile'
 import type { DashboardData } from '@/api/admin'
 
 use([GaugeChart, PieChart, GridComponent, TooltipComponent, CanvasRenderer])
 
+const { isMobile } = useIsMobile()
 const props = defineProps<{ data: DashboardData['quality'] }>()
 
 const gaugeOption = computed(() => ({
@@ -48,9 +50,9 @@ const auditPieOption = computed(() => ({
       <n-gi><StatCard label="待闭合伏笔" :value="data.open_foreshadows" color="#fa8c16" /></n-gi>
       <n-gi><StatCard label="漂流告警" :value="data.drift_alerts" color="#ff4d4f" /></n-gi>
     </n-grid>
-    <n-grid :cols="2" style="margin-top:16px">
-      <n-gi><v-chart style="height:220px" :option="gaugeOption" autoresize /></n-gi>
-      <n-gi><v-chart style="height:220px" :option="auditPieOption" autoresize /></n-gi>
+    <n-grid :cols="isMobile ? 1 : 2" style="margin-top:16px">
+      <n-gi><v-chart :style="{ height: isMobile ? '180px' : '220px' }" :option="gaugeOption" autoresize /></n-gi>
+      <n-gi><v-chart :style="{ height: isMobile ? '180px' : '220px' }" :option="auditPieOption" autoresize /></n-gi>
     </n-grid>
   </n-card>
 </template>

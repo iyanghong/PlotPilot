@@ -8,10 +8,12 @@ import { BarChart, PieChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import StatCard from './StatCard.vue'
+import { useIsMobile } from '@/composables/useIsMobile'
 import type { DashboardData } from '@/api/admin'
 
 use([BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
+const { isMobile } = useIsMobile()
 const props = defineProps<{ data: DashboardData['cast_foreshadow'] }>()
 
 const statusBarOption = computed(() => ({
@@ -48,9 +50,9 @@ const charTypePieOption = computed(() => ({
       <n-gi><StatCard label="平均人物/书" :value="data.avg_characters_per_novel" unit="人" color="#1677ff" /></n-gi>
       <n-gi><StatCard label="总伏笔" :value="data.total_foreshadows" color="#722ed1" /></n-gi>
     </n-grid>
-    <n-grid :cols="2" style="margin-top:16px">
-      <n-gi><v-chart style="height:200px" :option="statusBarOption" autoresize /></n-gi>
-      <n-gi><v-chart style="height:200px" :option="charTypePieOption" autoresize /></n-gi>
+    <n-grid :cols="isMobile ? 1 : 2" style="margin-top:16px">
+      <n-gi><v-chart :style="{ height: isMobile ? '180px' : '200px' }" :option="statusBarOption" autoresize /></n-gi>
+      <n-gi><v-chart :style="{ height: isMobile ? '180px' : '200px' }" :option="charTypePieOption" autoresize /></n-gi>
     </n-grid>
   </n-card>
 </template>

@@ -18,8 +18,8 @@ defineProps<{
 </template>
 
 <style scoped>
-.stat-card { text-align: center; }
-.stat-label { font-size: 13px; color: var(--n-text-color-2); margin-bottom: 6px; }
-.stat-value { font-size: 28px; font-weight: 700; }
-.stat-unit { font-size: 14px; font-weight: 400; margin-left: 4px; }
+.stat-card { text-align: center; padding: 8px 4px; }
+.stat-label { font-size: clamp(11px, 1.4vw, 13px); color: var(--n-text-color-2); margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat-value { font-size: clamp(18px, 3vw, 28px); font-weight: 700; line-height: 1.2; }
+.stat-unit { font-size: clamp(11px, 1.4vw, 14px); font-weight: 400; margin-left: 2px; }
 </style>

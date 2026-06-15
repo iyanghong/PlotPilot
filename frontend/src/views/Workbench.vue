@@ -17,7 +17,7 @@
 
   <!-- 桌面端布局 -->
   <div v-else class="workbench">
-    <StatsTopBar :slug="slug" @open-settings="appSettingsShell.open()" />
+    <StatsTopBar :slug="slug" :title="bookTitle" @open-settings="appSettingsShell.open()" />
 
     <n-spin :show="pageLoading" class="workbench-spin" description="加载工作台…">
       <div class="workbench-inner">
@@ -253,6 +253,13 @@ onMounted(async () => {
   window.addEventListener(WORKBENCH_CHAPTER_DESK_CHANGE_EVENT, onDeskChangeSignalFromPanels)
   window.addEventListener(WORKBENCH_OPEN_SETTINGS_PANEL_EVENT, onOpenSettingsPanelFromChild)
   window.addEventListener(WORKBENCH_GENERATION_PREFS_UPDATED_EVENT, onGenerationPrefsUpdated)
+
+  // 安全网：超时 10s 强制解除 loading，防止过渡动画异常导致白屏
+  const safetyTimer = setTimeout(() => {
+    pageLoading.value = false
+    if (!bookTitle.value) bookTitle.value = slug.value
+  }, 10000)
+
   try {
     await loadDesk()
     await syncChapterFromRoute()
@@ -260,6 +267,7 @@ onMounted(async () => {
     message.error('加载失败，请检查网络与后端是否已启动')
     bookTitle.value = slug.value
   } finally {
+    clearTimeout(safetyTimer)
     pageLoading.value = false
   }
 })

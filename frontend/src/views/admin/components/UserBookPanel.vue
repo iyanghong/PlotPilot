@@ -8,10 +8,12 @@ import { LineChart, BarChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import StatCard from './StatCard.vue'
+import { useIsMobile } from '@/composables/useIsMobile'
 import type { DashboardData } from '@/api/admin'
 
 use([LineChart, BarChart, GridComponent, TooltipComponent, CanvasRenderer])
 
+const { isMobile } = useIsMobile()
 const props = defineProps<{ data: DashboardData['books'] }>()
 
 const stageBarOption = computed(() => ({
@@ -47,9 +49,9 @@ const weeklyOption = computed(() => ({
       <n-gi><StatCard label="总书籍" :value="data.total" color="#1677ff" /></n-gi>
       <n-gi><StatCard label="本周活跃" :value="data.active_this_week" unit="本" color="#52c41a" /></n-gi>
     </n-grid>
-    <n-grid :cols="2" style="margin-top:16px">
-      <n-gi><v-chart style="height:200px" :option="stageBarOption" autoresize /></n-gi>
-      <n-gi><v-chart style="height:200px" :option="weeklyOption" autoresize /></n-gi>
+    <n-grid :cols="isMobile ? 1 : 2" style="margin-top:16px">
+      <n-gi><v-chart :style="{ height: isMobile ? '180px' : '200px' }" :option="stageBarOption" autoresize /></n-gi>
+      <n-gi><v-chart :style="{ height: isMobile ? '180px' : '200px' }" :option="weeklyOption" autoresize /></n-gi>
     </n-grid>
   </n-card>
 </template>

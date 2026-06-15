@@ -8,10 +8,12 @@ import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import StatCard from './StatCard.vue'
+import { useIsMobile } from '@/composables/useIsMobile'
 import type { DashboardData } from '@/api/admin'
 
 use([LineChart, GridComponent, TooltipComponent, CanvasRenderer])
 
+const { isMobile } = useIsMobile()
 const props = defineProps<{ data: DashboardData['system'] }>()
 
 const errorTrendOption = computed(() => ({
@@ -38,7 +40,7 @@ function healthTag(status: boolean) {
 
 <template>
   <n-card title="系统运行" size="small" embedded>
-    <n-grid :cols="4" :x-gap="12">
+    <n-grid :cols="isMobile ? 2 : 4" :x-gap="12">
       <n-gi><StatCard label="自动驾驶中" :value="data.autopilot_running" color="#1677ff" /></n-gi>
       <n-gi><StatCard label="错误数" :value="data.autopilot_errors" :color="data.autopilot_errors > 0 ? '#ff4d4f' : '#52c41a'" /></n-gi>
       <n-gi>
@@ -52,9 +54,9 @@ function healthTag(status: boolean) {
         </div>
       </n-gi>
     </n-grid>
-    <n-grid :cols="2" style="margin-top:16px">
-      <n-gi><v-chart style="height:200px" :option="errorTrendOption" autoresize /></n-gi>
-      <n-gi><v-chart style="height:200px" :option="latencyOption" autoresize /></n-gi>
+    <n-grid :cols="isMobile ? 1 : 2" style="margin-top:16px">
+      <n-gi><v-chart :style="{ height: isMobile ? '180px' : '200px' }" :option="errorTrendOption" autoresize /></n-gi>
+      <n-gi><v-chart :style="{ height: isMobile ? '180px' : '200px' }" :option="latencyOption" autoresize /></n-gi>
     </n-grid>
   </n-card>
 </template>
