@@ -11,6 +11,32 @@ const CharacterSchedulerSimulator = () =>
   import('../components/debug/CharacterSchedulerSimulator.vue')
 const LoginView = () => import('../views/LoginView.vue')
 
+// ── 后台管理路由（懒加载）──────────────────────────
+const AdminLayout = () => import('../views/admin/AdminLayout.vue')
+const DashboardView = () => import('../views/admin/DashboardView.vue')
+const UserListView = () => import('../views/admin/UserListView.vue')
+const BookListView = () => import('../views/admin/BookListView.vue')
+
+const adminRoutes = [
+  {
+    path: '/admin',
+    component: AdminLayout,
+    meta: { requiresAuth: true },
+    children: [
+      { path: '', redirect: '/admin/dashboard' },
+      { path: 'dashboard', name: 'AdminDashboard', component: DashboardView },
+      {
+        path: 'users', name: 'AdminUsers', component: UserListView,
+        meta: { requiresAdmin: true },
+      },
+      {
+        path: 'books', name: 'AdminBooks', component: BookListView,
+        meta: { requiresAdmin: true },
+      },
+    ],
+  },
+]
+
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -27,6 +53,7 @@ const router = createRouter({
       component: CharacterSchedulerSimulator,
     },
     ...readerRoutes,
+    ...adminRoutes,
   ],
 })
 
@@ -52,6 +79,11 @@ router.beforeEach(async (to, _from, next) => {
   // web 模式且未认证 → 跳转登录页
   if (authStore.needsLogin) {
     return next({ name: 'Login', query: { redirect: to.fullPath } })
+  }
+
+  // 后台管理子路由需要 admin 权限
+  if (to.meta.requiresAdmin && !authStore.isAdmin) {
+    return next({ name: 'AdminDashboard' })
   }
 
   next()
