@@ -1,6 +1,9 @@
 """小说数据导出/导入 API 路由 — 作者：Axelton"""
+import os
+import shutil
+import tempfile
 import urllib.parse
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 
 from application.core.services.novel_backup_service import NovelBackupService
@@ -9,10 +12,19 @@ from interfaces.api.dependencies import get_novel_repository
 
 router = APIRouter(prefix="/backup", tags=["backup"])
 
+# 流式传输分块大小：1MB
+_STREAM_CHUNK_SIZE = 1024 * 1024
+
+
+def _file_iterator(path: str, chunk_size: int = _STREAM_CHUNK_SIZE):
+    """按块读取文件并 yield，适配 StreamingResponse"""
+    with open(path, "rb") as f:
+        while chunk := f.read(chunk_size):
+            yield chunk
+
 
 def get_backup_service() -> NovelBackupService:
     """获取备份服务"""
-    import os
     persist_dir = os.getenv("CHROMADB_PERSIST_DIR", "./data/chromadb")
     return NovelBackupService(
         novel_repository=get_novel_repository(),
@@ -23,22 +35,32 @@ def get_backup_service() -> NovelBackupService:
 @router.get("/novel/{novel_id}")
 async def export_novel_backup(
     novel_id: str,
+    background_tasks: BackgroundTasks,
     backup_service: NovelBackupService = Depends(get_backup_service),
 ):
-    """导出小说全部数据库数据 + 向量为 ZIP 文件"""
+    """导出小说全部数据库数据 + 向量为 ZIP 文件（流式分块传输，支持大部头小说）"""
+    tmp_dir = tempfile.mkdtemp(prefix="plotpilot_backup_")
     try:
-        zip_bytes, filename = backup_service.export_to_zip(novel_id)
+        zip_path, filename = backup_service.export_to_zip_path(novel_id, tmp_dir)
     except ValueError as e:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
         raise HTTPException(status_code=500, detail=f"导出失败: {str(e)}")
 
+    # 响应发送完成后清理临时目录
+    background_tasks.add_task(shutil.rmtree, tmp_dir, ignore_errors=True)
+
     encoded_filename = urllib.parse.quote(filename)
+    file_size = os.path.getsize(zip_path)
+
     return StreamingResponse(
-        iter([zip_bytes]),
+        _file_iterator(zip_path),
         media_type="application/zip",
         headers={
-            "Content-Disposition": f"attachment; filename={encoded_filename}; filename*=UTF-8''{encoded_filename}"
+            "Content-Disposition": f"attachment; filename={encoded_filename}; filename*=UTF-8''{encoded_filename}",
+            "Content-Length": str(file_size),
         },
     )
 

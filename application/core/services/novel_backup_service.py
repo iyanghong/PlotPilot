@@ -45,7 +45,7 @@ class NovelBackupService:
     # ===========================================================
 
     def export_to_zip(self, novel_id: str) -> Tuple[bytes, str]:
-        """导出指定小说的全部数据到 ZIP 字节流。
+        """导出指定小说的全部数据到 ZIP 字节流（小文件场景，一次性读入内存）。
 
         Returns:
             (zip_bytes, filename)
@@ -61,6 +61,29 @@ class NovelBackupService:
             zip_path = tmp / filename
             self._build_backup_zip(novel_id, str(zip_path))
             return zip_path.read_bytes(), filename
+
+    def export_to_zip_path(self, novel_id: str, output_dir: str) -> Tuple[str, str]:
+        """导出小说备份 ZIP 到指定目录，返回文件路径供流式传输。
+
+        适用于大部头小说场景：ZIP 构建到磁盘后由调用方分块流式读取，
+        避免将整个 ZIP 载入内存导致 OOM 或超时。
+
+        Args:
+            novel_id: 小说 ID
+            output_dir: 输出目录（调用方负责生命周期管理）
+
+        Returns:
+            (zip_path, filename)
+        Raises:
+            ValueError: novel not found
+        """
+        novel = self._validate_novel(novel_id)
+        title = getattr(novel, 'title', None) or novel_id
+        filename = _sanitize_filename(title, novel_id)
+
+        zip_path = Path(output_dir) / filename
+        self._build_backup_zip(novel_id, str(zip_path))
+        return str(zip_path), filename
 
     def _build_backup_zip(self, novel_id: str, zip_path: str) -> None:
         """构建 ZIP: data.json + chromadb/ 目录"""
