@@ -25,7 +25,7 @@ class DashboardService:
             f"""SELECT
                   COALESCE(SUM(LENGTH(c.content)), 0) as total_words,
                   COUNT(DISTINCT c.id) as total_chapters,
-                  COALESCE(SUM(CASE WHEN n.current_stage = 'completed' THEN 1 ELSE 0 END), 0) as completed_novels,
+                  COUNT(DISTINCT CASE WHEN n.current_stage = 'completed' THEN n.id END) as completed_novels,
                   CASE WHEN COUNT(DISTINCT c.id) > 0
                     THEN CAST(SUM(LENGTH(c.content)) AS REAL) / COUNT(DISTINCT c.id)
                     ELSE 0 END as avg_words_per_chapter

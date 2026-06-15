@@ -16,6 +16,12 @@ use([LineChart, BarChart, PieChart, GridComponent, TooltipComponent, LegendCompo
 const { isMobile } = useIsMobile()
 const props = defineProps<{ data: DashboardData['writing'] }>()
 
+/** 总字数转为「万」为单位，保留一位小数 */
+const totalWordsWan = computed(() => {
+  const wan = props.data.total_words / 10000
+  return wan >= 1 ? wan.toFixed(1) : wan.toFixed(2)
+})
+
 const dailyTrendOption = computed(() => ({
   grid: { left: 40, right: 16, top: 20, bottom: 24 },
   xAxis: { type: 'category', data: props.data.daily_trend.map(d => d.date.slice(5)), axisLabel: { fontSize: 10 } },
@@ -28,7 +34,7 @@ const dailyTrendOption = computed(() => ({
 <template>
   <n-card title="写作产出" size="small" embedded>
     <n-grid :cols="isMobile ? 2 : 4" :x-gap="12">
-      <n-gi><StatCard label="总字数" :value="data.total_words.toLocaleString()" unit="字" color="#1677ff" /></n-gi>
+      <n-gi><StatCard label="总字数" :value="totalWordsWan" unit="万字" color="#1677ff" /></n-gi>
       <n-gi><StatCard label="总章节" :value="data.total_chapters" color="#52c41a" /></n-gi>
       <n-gi><StatCard label="完本" :value="data.completed_novels" unit="本" color="#722ed1" /></n-gi>
       <n-gi><StatCard label="平均章节" :value="data.avg_words_per_chapter" unit="字/章" color="#fa8c16" /></n-gi>
