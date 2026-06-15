@@ -6,10 +6,7 @@
 """
 
 from __future__ import annotations
-import logging
-from typing import Any, Dict, List, Optional
-
-logger = logging.getLogger(__name__)
+from typing import Any, Dict, Optional
 
 
 class DashboardService:
@@ -42,7 +39,7 @@ class DashboardService:
                        SUM(LENGTH(c.content)) as word_count
                 FROM chapters c
                 JOIN novels n ON n.id = c.novel_id
-                WHERE c.created_at >= DATE('now', '-30 days') {_novel_filter.replace('n.', 'n.', 1) if _novel_filter else ''}
+                WHERE c.created_at >= DATE('now', '-30 days') {_novel_filter}
                 GROUP BY DATE(c.created_at)
                 ORDER BY date""",
             _params,
@@ -63,38 +60,42 @@ class DashboardService:
         _novel_filter, _params = self._novel_scope_filter(scope, user_id)
         overview = self._db.fetch_one(
             f"""SELECT COUNT(*) as total_calls,
-                       COALESCE(SUM(json_extract(metadata, '$.usage.input_tokens')), 0)
-                       + COALESCE(SUM(json_extract(metadata, '$.usage.output_tokens')), 0) as total_tokens
-                FROM ai_trace_spans
+                       COALESCE(SUM(json_extract(t.metadata, '$.usage.input_tokens')), 0)
+                       + COALESCE(SUM(json_extract(t.metadata, '$.usage.output_tokens')), 0) as total_tokens
+                FROM ai_trace_spans t
+                JOIN novels n ON n.id = t.novel_id
                 WHERE 1=1 {_novel_filter}""",
             _params,
         )
         today = self._db.fetch_one(
             f"""SELECT COUNT(*) as today_calls,
-                       COALESCE(SUM(json_extract(metadata, '$.usage.input_tokens')), 0)
-                       + COALESCE(SUM(json_extract(metadata, '$.usage.output_tokens')), 0) as today_tokens,
-                       COALESCE(AVG(duration_ms), 0) as avg_latency_ms
-                FROM ai_trace_spans
-                WHERE DATE(created_at) = DATE('now') {_novel_filter}""",
+                       COALESCE(SUM(json_extract(t.metadata, '$.usage.input_tokens')), 0)
+                       + COALESCE(SUM(json_extract(t.metadata, '$.usage.output_tokens')), 0) as today_tokens,
+                       COALESCE(AVG(t.latency_ms), 0) as avg_latency_ms
+                FROM ai_trace_spans t
+                JOIN novels n ON n.id = t.novel_id
+                WHERE DATE(t.created_at) = DATE('now') {_novel_filter}""",
             _params,
         )
         by_model = self._db.fetch_all(
-            f"""SELECT COALESCE(model, 'unknown') as model,
+            f"""SELECT COALESCE(t.model, 'unknown') as model,
                        COUNT(*) as calls,
-                       COALESCE(SUM(json_extract(metadata, '$.usage.input_tokens')), 0)
-                       + COALESCE(SUM(json_extract(metadata, '$.usage.output_tokens')), 0) as tokens
-                FROM ai_trace_spans
+                       COALESCE(SUM(json_extract(t.metadata, '$.usage.input_tokens')), 0)
+                       + COALESCE(SUM(json_extract(t.metadata, '$.usage.output_tokens')), 0) as tokens
+                FROM ai_trace_spans t
+                JOIN novels n ON n.id = t.novel_id
                 WHERE 1=1 {_novel_filter}
-                GROUP BY model
+                GROUP BY t.model
                 ORDER BY calls DESC""",
             _params,
         )
         daily_trend = self._db.fetch_all(
-            f"""SELECT DATE(created_at) as date,
+            f"""SELECT DATE(t.created_at) as date,
                        COUNT(*) as call_count
-                FROM ai_trace_spans
-                WHERE created_at >= DATE('now', '-30 days') {_novel_filter}
-                GROUP BY DATE(created_at)
+                FROM ai_trace_spans t
+                JOIN novels n ON n.id = t.novel_id
+                WHERE t.created_at >= DATE('now', '-30 days') {_novel_filter}
+                GROUP BY DATE(t.created_at)
                 ORDER BY date""",
             _params,
         )
@@ -185,7 +186,7 @@ class DashboardService:
         drift = self._db.fetch_one(
             f"""SELECT COUNT(*) as drift_alerts
                 FROM novels n
-                WHERE n.last_audit_drift_alert = 1 {_novel_filter.replace('AND', 'AND') if _novel_filter else ''}""",
+                WHERE n.last_audit_drift_alert = 1 {_novel_filter}""",
             _params,
         )
         return {
@@ -290,12 +291,12 @@ class DashboardService:
                        COUNT(*) as error_count
                 FROM ai_trace_spans
                 WHERE created_at >= DATETIME('now', '-24 hours')
-                  AND status = 'error'
+                  AND error IS NOT NULL AND error != ''
                 GROUP BY strftime('%H', created_at)
                 ORDER BY hour"""
         )
         latency = self._db.fetch_one(
-            """SELECT COALESCE(AVG(duration_ms), 0) as avg_ms
+            """SELECT COALESCE(AVG(latency_ms), 0) as avg_ms
                 FROM ai_trace_spans
                 WHERE created_at >= DATETIME('now', '-1 hours')"""
         )
