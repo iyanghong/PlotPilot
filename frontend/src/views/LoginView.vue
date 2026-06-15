@@ -32,6 +32,12 @@
           />
         </n-form-item>
 
+        <n-form-item>
+          <n-checkbox v-model:checked="rememberPwd">
+            记住密码
+          </n-checkbox>
+        </n-form-item>
+
         <n-button
           type="primary"
           size="large"
@@ -56,9 +62,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { NForm, NFormItem, NInput, NButton, NAlert } from 'naive-ui'
+import { NForm, NFormItem, NInput, NButton, NCheckbox, NAlert } from 'naive-ui'
 import type { FormInst, FormRules } from 'naive-ui'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -69,6 +75,26 @@ const authStore = useAuthStore()
 const formRef = ref<FormInst | null>(null)
 const submitting = ref(false)
 const errorMsg = ref('')
+const rememberPwd = ref(false)
+
+const REMEMBER_KEY = 'plotpilot_remembered_login'
+
+// 页面加载时恢复已保存的账号密码
+onMounted(() => {
+  try {
+    const saved = localStorage.getItem(REMEMBER_KEY)
+    if (saved) {
+      const data = JSON.parse(saved)
+      if (data.username && data.password) {
+        form.username = data.username
+        form.password = data.password
+        rememberPwd.value = true
+      }
+    }
+  } catch {
+    // 解析失败则忽略
+  }
+})
 
 const form = reactive({
   username: '',
@@ -92,6 +118,15 @@ async function handleSubmit() {
   try {
     const result = await authStore.login(form.username, form.password)
     if (result.success) {
+      // 记住密码
+      if (rememberPwd.value) {
+        localStorage.setItem(REMEMBER_KEY, JSON.stringify({
+          username: form.username,
+          password: form.password,
+        }))
+      } else {
+        localStorage.removeItem(REMEMBER_KEY)
+      }
       const redirect = (route.query.redirect as string) || '/'
       router.push(redirect)
     } else {

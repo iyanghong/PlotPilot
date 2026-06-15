@@ -24,7 +24,7 @@ export async function downloadBackup(novelId: string): Promise<void> {
   URL.revokeObjectURL(url)
 }
 
-/** 导入小说备份 ZIP */
+/** 导入小说备份 ZIP（覆盖已有小说） */
 export async function uploadBackup(
   novelId: string,
   file: File,
@@ -33,6 +33,25 @@ export async function uploadBackup(
   formData.append('file', file)
   const token = localStorage.getItem('token')
   const res = await fetch(`/api/v1/backup/novel/${novelId}/restore`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  })
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '')
+    throw new Error(msg || '导入失败')
+  }
+  return res.json()
+}
+
+/** 从备份 ZIP 创建新小说（跨实例导入，无需已有小说） */
+export async function uploadBackupAsNew(
+  file: File,
+): Promise<{ success: boolean; novel_id: string; stats: Record<string, number> }> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const token = localStorage.getItem('token')
+  const res = await fetch('/api/v1/backup/restore', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: formData,

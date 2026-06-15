@@ -148,8 +148,13 @@ class DataImporter:
                 "表 %s 无法执行 DELETE (可能无 novel_id 列): %s", table_name, e
             )
 
+        # 检测 INTEGER PK 的 id 列 — 剥离后让 SQLite 自动生成 rowid，防止跨小说主键冲突
+        stripped_pk = self._detect_integer_pk_id(db, table_name)
+
         # 构建 INSERT SQL
         cols = list(rows[0].keys())
+        if stripped_pk and "id" in cols:
+            cols.remove("id")
         col_names = ", ".join(f'"{c}"' for c in cols)
         placeholders = ", ".join(["?"] * len(cols))
         insert_sql = f'INSERT INTO "{table_name}" ({col_names}) VALUES ({placeholders})'
@@ -160,6 +165,23 @@ class DataImporter:
 
         logger.info("表 %s: 已导入 %d 行", table_name, len(rows))
         return len(rows)
+
+    def _detect_integer_pk_id(self, db, table_name: str) -> bool:
+        """检测表是否以 INTEGER 类型列作为主键 id。
+
+        SQLite 中 INTEGER PRIMARY KEY 是 rowid 的别名，插入字符串值会
+        触发 datatype mismatch（STRICT 模式下）或静默转换。剥离后让
+        SQLite 自动生成新 rowid，避免跨小说导入时的主键冲突。
+        """
+        try:
+            info = db.fetch_all(f"PRAGMA table_info(\"{table_name}\")")
+            for col in info:
+                if col["name"] == "id" and col["pk"] > 0:
+                    col_type = (col.get("type") or "").upper()
+                    return "INT" in col_type
+        except Exception:
+            pass
+        return False
 
     # ============================================================
     #  事务辅助方法

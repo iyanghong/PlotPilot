@@ -1,0 +1,78 @@
+services:
+  backend:
+    image: plotpilot-backend:dev
+    build:
+      context: .
+      args:
+        APT_MIRROR: ${APT_MIRROR:-mirrors.tuna.tsinghua.edu.cn}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+      dockerfile_inline: |
+        FROM docker.iyanghong.cn/python:3.14-slim
+
+        ARG APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
+        ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+
+        ENV PYTHONDONTWRITEBYTECODE=1 \
+            PYTHONUNBUFFERED=1 \
+            PIP_DISABLE_PIP_VERSION_CHECK=1 \
+            PIP_INDEX_URL=$${PIP_INDEX_URL}
+
+        WORKDIR /app
+
+        RUN if [ -n "$$APT_MIRROR" ]; then \
+              sed -i "s|deb.debian.org|$$APT_MIRROR|g; s|security.debian.org|$$APT_MIRROR|g" /etc/apt/sources.list.d/debian.sources; \
+            fi \
+            && apt-get update \
+            && apt-get install -y --no-install-recommends curl \
+            && rm -rf /var/lib/apt/lists/*
+
+        COPY requirements.txt ./
+        RUN pip install --no-cache-dir -r requirements.txt
+    working_dir: /app
+    network_mode: host
+    user: "${PLOTPILOT_UID:-1000}:${PLOTPILOT_GID:-1000}"
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FILE: ${LOG_FILE:-logs/plotpilot.log}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:${PLOTPILOT_FRONTEND_PORT:-3000},http://127.0.0.1:${PLOTPILOT_FRONTEND_PORT:-3000}}
+      EMBEDDING_SERVICE: ${EMBEDDING_SERVICE:-openai}
+      VECTOR_STORE_TYPE: ${VECTOR_STORE_TYPE:-chromadb}
+      VECTOR_STORE_PATH: ${VECTOR_STORE_PATH:-./data/chromadb}
+      PLOTPILOT_PROD_DATA_DIR: /app/data
+      PLOTPILOT_BACKEND_PORT: ${PLOTPILOT_BACKEND_PORT:-8005}
+    volumes:
+      - .:/app
+      - ${PLOTPILOT_DATA_DIR:-./data}:/app/data
+    command: >
+      sh -lc "mkdir -p data logs .models &&
+      uvicorn interfaces.main:app --host 127.0.0.1 --port ${PLOTPILOT_BACKEND_PORT:-8005} --reload"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${PLOTPILOT_BACKEND_PORT:-8005}/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  frontend:
+    image: docker.iyanghong.cn/node:24-alpine
+    working_dir: /app/frontend
+    network_mode: host
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NPM_CONFIG_CACHE: /root/.npm
+      NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
+      PLOTPILOT_FRONTEND_PORT: ${PLOTPILOT_FRONTEND_PORT:-3000}
+      PLOTPILOT_BACKEND_PORT: ${PLOTPILOT_BACKEND_PORT:-8005}
+    volumes:
+      - .:/app
+      - frontend-node-modules:/app/frontend/node_modules
+      - frontend-npm-cache:/root/.npm
+    command: >
+      sh -lc "npm ci &&
+      npm run dev -- --host 0.0.0.0 --port ${PLOTPILOT_FRONTEND_PORT:-3000}"
+
+volumes:
+  frontend-node-modules:
+  frontend-npm-cache:

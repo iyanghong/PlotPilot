@@ -70,6 +70,19 @@
                 </template>
                 灵感助手
               </n-button>
+              <n-button text type="warning" :loading="importingBackup" @click="triggerBackupImport" style="margin-left: 8px">
+                <template #icon>
+                  <n-icon><IconUpload /></n-icon>
+                </template>
+                从备份导入
+              </n-button>
+              <input
+                ref="backupImportInputRef"
+                type="file"
+                accept=".zip"
+                style="display: none"
+                @change="handleBackupImport"
+              />
             </div>
 
             <n-input
@@ -450,6 +463,8 @@ import { defineAsyncComponent, h, ref, onMounted, computed, nextTick } from 'vue
 import { useRouter } from 'vue-router'
 import { NDropdown, useMessage, NIcon } from 'naive-ui'
 import { novelApi, type NovelDTO } from '../api/novel'
+import { uploadBackupAsNew } from '@/api/backup'
+import type { AssistFieldData } from '@/api/assist'
 import { isWizardCompleted } from '@/utils/wizardStageCache'
 import StatsSidebar from '@/components/stats/StatsSidebar.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
@@ -502,6 +517,10 @@ const IconChevronUp = () =>
   h('svg', { xmlns: 'http://www.w3.org/2000/svg', viewBox: '0 0 24 24', width: '1em', height: '1em' },
     h('path', { fill: 'currentColor', d: 'M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6 1.41 1.41z' }))
 
+const IconUpload = () =>
+  h('svg', { xmlns: 'http://www.w3.org/2000/svg', viewBox: '0 0 24 24', width: '1em', height: '1em' },
+    h('path', { fill: 'currentColor', d: 'M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z' }))
+
 /** 与工作台顶栏一致：打开应用设置（默认「外观与主题」分区） */
 const IconThemeSettings = () =>
   h('svg', { xmlns: 'http://www.w3.org/2000/svg', viewBox: '0 0 24 24', width: '1em', height: '1em' },
@@ -542,6 +561,8 @@ function handleUserMenuSelect(key: string) {
 const createInputRef = ref<any>(null)
 const showAdvanced = ref(false)
 const showInspireAssistant = ref(false)
+const importingBackup = ref(false)
+const backupImportInputRef = ref<HTMLInputElement | null>(null)
 const creating = ref(false)
 const loading = ref(false)
 
@@ -810,7 +831,7 @@ const handleBatchDelete = async () => {
 }
 
 /** 灵感助手字段填充处理 */
-function handleInspireFill(fields: Record<string, string>) {
+function handleInspireFill(fields: AssistFieldData) {
   if (!fields || Object.keys(fields).length === 0) {
     showInspireAssistant.value = false
     return
@@ -825,6 +846,36 @@ function handleInspireFill(fields: Record<string, string>) {
   if (fields.special_requirements) newBook.value.specialRequirements = fields.special_requirements
   showInspireAssistant.value = false
   message.success('已填充灵感助手生成的内容，可继续修改后创建')
+}
+
+/** 触发备份文件选择 */
+function triggerBackupImport() {
+  backupImportInputRef.value?.click()
+}
+
+/** 处理从备份导入 */
+async function handleBackupImport(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+
+  importingBackup.value = true
+  try {
+    const result = await uploadBackupAsNew(file)
+    message.success('导入成功！')
+    // 刷新书目列表
+    await fetchBooks()
+    await statsStore.loadGlobalStats(true)
+    // 清空 input 以便重复选择同一文件
+    input.value = ''
+    // 跳转到新书的工作台
+    router.push(`/book/${result.novel_id}/workbench`)
+  } catch (error: unknown) {
+    message.error(formatApiError(error, '导入失败'))
+    input.value = ''
+  } finally {
+    importingBackup.value = false
+  }
 }
 
 const focusCreateInput = () => {

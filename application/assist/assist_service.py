@@ -6,7 +6,11 @@ import json
 import logging
 import re
 import uuid
-from typing import AsyncIterator, List, Optional
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +29,96 @@ from application.assist.strategies.brainstorm import BrainstormStrategy
 from application.assist.strategies.world_first import WorldFirstStrategy
 from application.assist.strategies.character_driven import CharacterDrivenStrategy
 from application.assist.strategies.theme_first import ThemeFirstStrategy
+
+
+# ---- taxonomy template 匹配 ----
+
+_TAXONOMY_YAML_PATH = (
+    Path(__file__).resolve().parents[2] / "shared" / "taxonomy" / "builtin_cn_v1.yaml"
+)
+
+
+@lru_cache(maxsize=1)
+def _load_taxonomy_lookup() -> Dict[str, Dict[str, Any]]:
+    """加载 taxonomy 并构建 genre label → {world_tone, writing_profile} 查找表
+
+    同时索引根节点和子节点标签，子节点优先匹配。
+    """
+    if not _TAXONOMY_YAML_PATH.is_file():
+        logger.warning("taxonomy 文件不存在: %s", _TAXONOMY_YAML_PATH)
+        return {}
+
+    raw = yaml.safe_load(_TAXONOMY_YAML_PATH.read_text(encoding="utf-8"))
+    lookup: Dict[str, Dict[str, Any]] = {}
+
+    for root in raw.get("roots", []):
+        root_label = root.get("labels", {}).get("zh-CN", "").strip()
+        root_wp = _normalize_writing_profile(root.get("facets", {}).get("writing_profile", {}))
+        root_wt = root.get("facets", {}).get("world_tone", "")
+
+        # 根节点
+        if root_label:
+            lookup[root_label] = {
+                "world_tone": root_wt,
+                "writing_profile": root_wp,
+            }
+        # 子节点（优先覆盖）
+        for child in root.get("children", []):
+            child_label = child.get("labels", {}).get("zh-CN", "").strip()
+            child_facets = child.get("facets", {})
+            child_wp = _normalize_writing_profile(child_facets.get("writing_profile", {}))
+            child_wt = child_facets.get("world_tone", "") or root_wt
+            if child_label:
+                lookup[child_label] = {
+                    "world_tone": child_wt,
+                    "writing_profile": child_wp if any(child_wp.values()) else root_wp,
+                }
+
+    logger.debug("taxonomy lookup 已加载 %d 个条目", len(lookup))
+    return lookup
+
+
+def _normalize_writing_profile(wp: dict) -> Dict[str, str]:
+    """将 YAML 里的 writing_profile 对象转为统一字符串键"""
+    return {
+        "story_structure": (wp.get("story_structure") or "").strip(),
+        "pacing_control": (wp.get("pacing_control") or "").strip(),
+        "writing_style": (wp.get("writing_style") or "").strip(),
+        "special_requirements": (wp.get("special_requirements") or "").strip(),
+    }
+
+
+def _resolve_taxonomy_fields(genre_str: str) -> Tuple[Optional[str], Optional[Dict[str, str]]]:
+    """根据 LLM 提取的 genre 字符串匹配 taxonomy 内置模板
+
+    genre_str 格式示例：'科幻/社会人际'、'科幻 / 星际文明'、'玄幻'
+
+    Returns:
+        (world_tone, writing_profile_dict) 或 (None, None)
+    """
+    if not genre_str or not genre_str.strip():
+        return None, None
+
+    lookup = _load_taxonomy_lookup()
+    if not lookup:
+        return None, None
+
+    # 分割 genre 字符串
+    parts = [p.strip() for p in re.split(r"\s*/\s*", genre_str.strip()) if p.strip()]
+
+    # 优先匹配最具体的部分（子节点），再回退到根
+    for part in reversed(parts):
+        if part in lookup:
+            entry = lookup[part]
+            return entry["world_tone"], entry["writing_profile"]
+
+    # 模糊匹配：子串包含在 label 中（同样优先更长的 label）
+    for part in reversed(parts):
+        for label, entry in sorted(lookup.items(), key=lambda x: len(x[0]), reverse=True):
+            if part in label or label in part:
+                return entry["world_tone"], entry["writing_profile"]
+
+    return None, None
 
 
 def _get_strategy(strategy_name: str) -> BaseInspirationStrategy:
@@ -150,13 +244,15 @@ class AssistService:
         history = await self._repo.get_messages(session.id)
         strategy = _get_strategy(session.strategy.value)
 
-        # 构建带历史的多轮对话 prompt
+        # 构建带历史的多轮对话 prompt — system prompt 包含全部行为指令，user prompt 只放对话文本
         conversation = _build_conversation_text(history)
-        full_prompt = (
-            f"以下是对话历史：\n\n{conversation}\n\n"
-            f"请根据对话历史，继续引导用户深入探索。用中文回复。"
+        prompt = Prompt(
+            system=(
+                f"{strategy.build_system_prompt()}\n\n"
+                f"请根据对话历史给出回复，用中文回复。"
+            ),
+            user=f"{conversation}\n\n助手：",
         )
-        prompt = Prompt(system=strategy.build_system_prompt(), user=full_prompt)
 
         # 3. 流式生成
         full_content = ""
@@ -181,23 +277,18 @@ class AssistService:
     # ---- field extraction ----
 
     async def generate_fields(self, session: InspireSession) -> InspireFieldData:
-        """从对话历史中提取结构化字段
+        """从对话历史中提取结构化字段 — 两步流程
 
-        调用 LLM 分析完整对话历史，提取作品标题、前提、类型、
-        世界观预设、故事结构、节奏控制、写作风格、特殊需求等字段，
+        Step 1: LLM 提取 title / premise / genre
+        Step 2: 匹配 taxonomy 内置模板后，再调 LLM 根据模板框架为具体故事定制 world_preset +
+                story_structure / pacing_control / writing_style / special_requirements
         并将灵感会话标记为已完成。
-
-        Args:
-            session: 灵感助手对话会话
-
-        Returns:
-            结构化的 InspireFieldData 值对象
         """
         history = await self._repo.get_messages(session.id)
         strategy = _get_strategy(session.strategy.value)
         conversation = _build_conversation_text(history)
 
-        # 使用 stream_generate 收集完整结果，以确保策略的系统提示词生效
+        # ---- Step 1: 提取 title / premise / genre ----
         extraction_prompt = strategy.build_field_extraction_prompt(conversation)
         prompt = Prompt(
             system=strategy.build_system_prompt(),
@@ -207,19 +298,58 @@ class AssistService:
         async for chunk in self._llm.stream_generate(prompt):
             raw += chunk
 
-        # 解析 JSON（清洗可能的 markdown 代码块包裹）
         data = self._parse_json_response(raw)
+        genre_str = data.get("genre", "")
+        title = data.get("title", "")
+        premise = data.get("premise", "")
 
-        fields = InspireFieldData(
-            title=data.get("title", ""),
-            premise=data.get("premise", ""),
-            genre=data.get("genre", ""),
-            world_preset=data.get("worldPreset", ""),
-            story_structure=data.get("storyStructure", ""),
-            pacing_control=data.get("pacingControl", ""),
-            writing_style=data.get("writingStyle", ""),
-            special_requirements=data.get("specialRequirements", ""),
-        )
+        # ---- Step 2: 匹配 taxonomy 模板并调 LLM 定制化 ----
+        tax_world_tone, tax_wp = _resolve_taxonomy_fields(genre_str)
+
+        if tax_wp:
+            # 用内置模板作为框架，让 LLM 为这部具体作品定制
+            cust_prompt = strategy.build_field_customization_prompt(
+                conversation_history=conversation,
+                title=title,
+                premise=premise,
+                genre=genre_str,
+                tax_writing_profile=tax_wp,
+                tax_world_tone=tax_world_tone or "",
+            )
+            cust_raw = ""
+            async for chunk in self._llm.stream_generate(Prompt(
+                system=(
+                    "你是一个写作规则定制专家，擅长将通用写作模板适配到具体作品。"
+                    "严格遵循模板的结构框架，但将内容替换为贴合作品的定制化描述。"
+                    "用中文回复。"
+                ),
+                user=cust_prompt,
+            )):
+                cust_raw += chunk
+
+            cust_data = self._parse_json_response(cust_raw)
+            fields = InspireFieldData(
+                title=title,
+                premise=premise,
+                genre=genre_str,
+                world_preset=cust_data.get("worldPreset", tax_world_tone or ""),
+                story_structure=cust_data.get("storyStructure", tax_wp.get("story_structure", "")),
+                pacing_control=cust_data.get("pacingControl", tax_wp.get("pacing_control", "")),
+                writing_style=cust_data.get("writingStyle", tax_wp.get("writing_style", "")),
+                special_requirements=cust_data.get("specialRequirements", tax_wp.get("special_requirements", "")),
+            )
+        else:
+            # 未匹配到 taxonomy 模板时，由 LLM 自由生成全部字段
+            fields = InspireFieldData(
+                title=title,
+                premise=premise,
+                genre=genre_str,
+                world_preset=data.get("worldPreset", ""),
+                story_structure=data.get("storyStructure", ""),
+                pacing_control=data.get("pacingControl", ""),
+                writing_style=data.get("writingStyle", ""),
+                special_requirements=data.get("specialRequirements", ""),
+            )
 
         # 将会话标记为完成
         session.complete()

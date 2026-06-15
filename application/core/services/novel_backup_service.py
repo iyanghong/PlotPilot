@@ -148,6 +148,10 @@ class NovelBackupService:
         if not json_path.exists():
             raise ValueError("ZIP 包缺少 data.json")
 
+        # 2.5 覆盖导入时移除 novels 表（novels 以 id 为主键无 novel_id 列，
+        #     导入会导致主键冲突；novels 表由 create_novel 创建，无需从备份覆盖）
+        self._strip_novels_from_json(json_path)
+
         # 3. 导入 SQL 数据
         db = get_database()
         stats = self._data_importer.restore_from_json(db, str(json_path), novel_id)
@@ -195,6 +199,141 @@ class NovelBackupService:
     # ===========================================================
     #  内部辅助方法
     # ===========================================================
+
+    # ===========================================================
+    #  跨实例导入（小说不存在时）
+    # ===========================================================
+
+    def restore_as_new_novel(
+        self, zip_bytes: bytes, user_id: str = None
+    ) -> Dict:
+        """从备份 ZIP 创建新小说（跨实例导入）。
+
+        从 ZIP 中提取小说元信息，生成新 novel_id，
+        将备份数据中的 novel_id 全部重映射后导入。
+
+        Returns:
+            {"novel_id": str, "stats": {...}}
+        Raises:
+            ValueError: ZIP 格式无效或无 novel 数据
+        """
+        import json as _json
+        import time as _time
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+
+            # 1. 解压 ZIP
+            zip_file = tmp / "backup.zip"
+            zip_file.write_bytes(zip_bytes)
+            extract_dir = tmp / "extracted"
+            extract_dir.mkdir()
+
+            with zipfile.ZipFile(str(zip_file), "r") as zf:
+                zf.extractall(str(extract_dir))
+
+            # 2. 读取 data.json
+            json_path = extract_dir / "data.json"
+            if not json_path.exists():
+                raise ValueError("ZIP 包缺少 data.json")
+
+            with open(json_path, "r", encoding="utf-8") as f:
+                backup_data = _json.load(f)
+
+            # 3. 读取小说元信息
+            novel_rows = backup_data.get("tables", {}).get("novels", [])
+            if not novel_rows:
+                raise ValueError("备份数据中缺少 novel 记录")
+
+            old_novel_id = backup_data.get("novel_id", "")
+            new_novel_id = f"novel-{int(_time.time() * 1000)}"
+
+            # 4. 重映射所有 novel_id → 新 ID
+            self._remap_novel_id_in_backup(backup_data, old_novel_id, new_novel_id)
+
+            # 5. 写回 data.json
+            with open(json_path, "w", encoding="utf-8") as f:
+                _json.dump(backup_data, f, ensure_ascii=False, indent=2)
+
+            # 6. 导入 SQL 数据
+            db = get_database()
+            stats = self._data_importer.restore_from_json(
+                db, str(json_path), new_novel_id
+            )
+
+            # 7. 导入 ChromaDB 向量
+            chromadb_dir = extract_dir / "chromadb"
+            if chromadb_dir.exists() and any(chromadb_dir.iterdir()):
+                vector_count = self._import_chromadb_vectors(str(chromadb_dir))
+                stats["vectors"] = vector_count
+
+            logger.info(
+                "跨实例导入完成: old_id=%s → new_id=%s, stats=%s",
+                old_novel_id,
+                new_novel_id,
+                stats,
+            )
+            return {"novel_id": new_novel_id, "stats": stats}
+
+    def _remap_novel_id_in_backup(
+        self, backup_data: Dict, old_novel_id: str, new_novel_id: str
+    ) -> None:
+        """将备份数据中所有旧 novel_id 替换为新 ID（两阶段全局重映射）。
+
+        阶段一：全局字符串替换 — 处理含旧 ID 的复合主键和外键
+        （如 chapter-{novel_id}-chapter-1）。
+
+        阶段二：非含 novel_id 的字符串 ID 列加前缀 — 处理全局唯一 ID
+        （如 fact-001 → {new_novel_id}_fact-001），防止与原小说数据主键冲突。
+        整数值跳过（INTEGER PK 由 DataImporter 自动剥离后让 SQLite 生成新 rowid）。
+        """
+        if not old_novel_id or old_novel_id == new_novel_id:
+            return
+
+        backup_data["novel_id"] = new_novel_id
+
+        for table_name, rows in backup_data.get("tables", {}).items():
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                for key, value in list(row.items()):
+                    if isinstance(value, str) and old_novel_id in value:
+                        row[key] = value.replace(old_novel_id, new_novel_id)
+
+        # 阶段二：对不含新 novel_id 的字符串 ID 列加前缀，保证跨实例唯一
+        # 跳过整数值 — INTEGER PK 列由 DataImporter 自动剥离后让 SQLite 生成新 rowid
+        for table_name, rows in backup_data.get("tables", {}).items():
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                for key, value in list(row.items()):
+                    if key == "id" or key.endswith("_id") or key == "slug":
+                        if isinstance(value, str) and new_novel_id not in value:
+                            row[key] = f"{new_novel_id}_{value}"
+
+    def _strip_novels_from_json(self, json_path: Path) -> None:
+        """从 data.json 中移除 novels 表数据。
+
+        覆盖导入已有小说时 novels 表已存在且以 id 为主键（无 novel_id 列），
+        导入会导致主键冲突。这里原地修改 JSON 文件将其移除。
+        """
+        import json as _json_module
+        try:
+            raw = json_path.read_text(encoding="utf-8")
+            data = _json_module.loads(raw)
+            if "novels" in data.get("tables", {}):
+                del data["tables"]["novels"]
+                json_path.write_text(
+                    _json_module.dumps(data, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                logger.debug("已从 data.json 移除 novels 表（覆盖模式）")
+        except Exception as e:
+            logger.debug("移除 novels 表失败（非致命）: %s", e)
 
     def _validate_novel(self, novel_id: str):
         """校验小说存在，返回 Novel 对象。不存在则抛出 ValueError。"""

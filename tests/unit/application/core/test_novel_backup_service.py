@@ -535,3 +535,458 @@ class TestSanitizeFilename:
         date_part = parts[-1]
         assert len(date_part) == 8
         assert date_part.isdigit()
+
+
+# ============================================================
+#  _strip_novels_from_json 测试
+# ============================================================
+
+
+class TestStripNovelsFromJson:
+    """测试 _strip_novels_from_json 移出 novels 表方法"""
+
+    def test_removes_novels_from_json(self, tmp_path):
+        """data.json 包含 novels 表时将其移除"""
+        repo = _make_novel_repo()
+        service = NovelBackupService(novel_repository=repo)
+
+        json_path = tmp_path / "data.json"
+        data = {
+            "version": "1.0",
+            "novel_id": "novel-1",
+            "tables": {
+                "novels": [{"id": "novel-1", "title": "测试"}],
+                "chapters": [{"id": 1, "novel_id": "novel-1", "title": "Ch1"}],
+                "story_nodes": [{"id": 2, "novel_id": "novel-1", "type": "scene"}],
+            },
+        }
+        json_path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+        service._strip_novels_from_json(json_path)
+
+        reloaded = json.loads(json_path.read_text(encoding="utf-8"))
+        assert "novels" not in reloaded["tables"]
+        assert "chapters" in reloaded["tables"]
+        assert "story_nodes" in reloaded["tables"]
+
+    def test_noop_when_no_novels_table(self, tmp_path):
+        """data.json 中无 novels 表时不做任何修改"""
+        repo = _make_novel_repo()
+        service = NovelBackupService(novel_repository=repo)
+
+        json_path = tmp_path / "data.json"
+        data = {
+            "version": "1.0",
+            "novel_id": "novel-1",
+            "tables": {
+                "chapters": [{"id": 1, "novel_id": "novel-1", "title": "Ch1"}],
+            },
+        }
+        original = json.dumps(data, ensure_ascii=False, indent=2)
+        json_path.write_text(original, encoding="utf-8")
+
+        service._strip_novels_from_json(json_path)
+
+        reloaded = json.loads(json_path.read_text(encoding="utf-8"))
+        assert "chapters" in reloaded["tables"]
+        assert len(reloaded["tables"]) == 1
+
+    def test_handles_malformed_json_gracefully(self, tmp_path):
+        """JSON 格式错误时不抛异常（非致命）"""
+        repo = _make_novel_repo()
+        service = NovelBackupService(novel_repository=repo)
+
+        json_path = tmp_path / "data.json"
+        json_path.write_text("{invalid json!!!", encoding="utf-8")
+
+        # 不应抛出异常
+        service._strip_novels_from_json(json_path)
+
+
+# ============================================================
+#  _remap_novel_id_in_backup 测试
+# ============================================================
+
+
+class TestRemapNovelIdInBackup:
+    """测试 _remap_novel_id_in_backup 全局字符串重映射方法"""
+
+    def test_remaps_top_level_novel_id(self):
+        """顶层 novel_id 被替换为新 ID"""
+        repo = _make_novel_repo()
+        service = NovelBackupService(novel_repository=repo)
+
+        backup = {
+            "version": "1.0",
+            "novel_id": "old-novel-1",
+            "tables": {"chapters": []},
+        }
+        service._remap_novel_id_in_backup(backup, "old-novel-1", "new-novel-2")
+
+        assert backup["novel_id"] == "new-novel-2"
+
+    def test_remaps_novel_id_in_table_rows(self):
+        """表中每行的 novel_id 列被替换"""
+        repo = _make_novel_repo()
+        service = NovelBackupService(novel_repository=repo)
+
+        backup = {
+            "version": "1.0",
+            "novel_id": "old-1",
+            "tables": {
+                "chapters": [
+                    {"id": 1, "novel_id": "old-1", "title": "Ch1"},
+                    {"id": 2, "novel_id": "old-1", "title": "Ch2"},
+                ],
+                "characters": [
+                    {"id": 10, "novel_id": "old-1", "name": "Hero"},
+                ],
+            },
+        }
+        service._remap_novel_id_in_backup(backup, "old-1", "new-2")
+
+        for row in backup["tables"]["chapters"]:
+            assert row["novel_id"] == "new-2"
+        for row in backup["tables"]["characters"]:
+            assert row["novel_id"] == "new-2"
+
+    def test_remaps_composite_ids_containing_old_novel_id(self):
+        """复合 ID（如 chapter-{novel_id}-chapter-1）中嵌入的旧 ID 也被替换"""
+        repo = _make_novel_repo()
+        service = NovelBackupService(novel_repository=repo)
+
+        backup = {
+            "version": "1.0",
+            "novel_id": "old-1",
+            "tables": {
+                "chapters": [
+                    {
+                        "id": "chapter-old-1-chapter-1",
+                        "novel_id": "old-1",
+                        "title": "Ch1",
+                        "outline": "下一章引子来源于 chapter-old-1-chapter-1 的伏笔",
+                    },
+                ],
+                "story_nodes": [
+                    {
+                        "id": "node-old-1-node-1",
+                        "novel_id": "old-1",
+                        "chapter_id": "chapter-old-1-chapter-1",
+                        "type": "scene",
+                    },
+                ],
+            },
+        }
+        service._remap_novel_id_in_backup(backup, "old-1", "new-2")
+
+        ch = backup["tables"]["chapters"][0]
+        assert ch["id"] == "chapter-new-2-chapter-1"
+        assert ch["novel_id"] == "new-2"
+        assert ch["title"] == "Ch1"  # 不含旧 ID，不变
+        assert "old-1" not in ch["outline"]  # prose 中的引用也被替换
+
+        sn = backup["tables"]["story_nodes"][0]
+        assert sn["id"] == "node-new-2-node-1"
+        assert sn["chapter_id"] == "chapter-new-2-chapter-1"
+
+    def test_remaps_novels_table_id_and_slug(self):
+        """novels 表的 id 和 slug 也被全局替换"""
+        repo = _make_novel_repo()
+        service = NovelBackupService(novel_repository=repo)
+
+        backup = {
+            "version": "1.0",
+            "novel_id": "old-1",
+            "tables": {
+                "novels": [
+                    {
+                        "id": "old-1",
+                        "slug": "old-1",
+                        "title": "测试小说",
+                        "novel_id": None,
+                    },
+                ],
+            },
+        }
+        service._remap_novel_id_in_backup(backup, "old-1", "new-2")
+
+        novel_row = backup["tables"]["novels"][0]
+        assert novel_row["id"] == "new-2"
+        assert novel_row["slug"] == "new-2"
+
+    def test_noop_when_old_equals_new(self):
+        """旧 ID 与新 ID 相同时不做任何修改"""
+        repo = _make_novel_repo()
+        service = NovelBackupService(novel_repository=repo)
+
+        backup = {
+            "version": "1.0",
+            "novel_id": "same-id",
+            "tables": {
+                "chapters": [
+                    {"id": 1, "novel_id": "same-id", "title": "Ch1"},
+                ],
+            },
+        }
+        service._remap_novel_id_in_backup(backup, "same-id", "same-id")
+
+        # 不应有任何变化
+        assert backup["novel_id"] == "same-id"
+        assert backup["tables"]["chapters"][0]["novel_id"] == "same-id"
+
+    def test_does_not_change_non_string_values(self):
+        """整数 ID 列会被加前缀（转为字符串），但非 ID 列不受影响"""
+        repo = _make_novel_repo()
+        service = NovelBackupService(novel_repository=repo)
+
+        backup = {
+            "version": "1.0",
+            "novel_id": "old-1",
+            "tables": {
+                "chapters": [
+                    {
+                        "id": 5,
+                        "chapter_number": 1,
+                        "novel_id": "old-1",
+                        "title": "Ch1",
+                    },
+                ],
+                "characters": [
+                    {
+                        "id": "char-99",
+                        "novel_id": "old-1",
+                        "name": "Hero",
+                    },
+                ],
+            },
+        }
+        service._remap_novel_id_in_backup(backup, "old-1", "new-2")
+
+        # 整数主键保持不变（由 DataImporter 剥离后让 SQLite 自动生成 rowid）
+        assert backup["tables"]["chapters"][0]["id"] == 5
+        # 非 ID 列不受影响（整数 chapter_number 不是 id 或 _id 结尾）
+        assert backup["tables"]["chapters"][0]["chapter_number"] == 1
+        # 字符串 ID 不含 novel_id 也被加前缀
+        assert backup["tables"]["characters"][0]["id"] == "new-2_char-99"
+        assert backup["tables"]["characters"][0]["novel_id"] == "new-2"
+
+    def test_handles_rows_without_novel_id(self):
+        """没有 novel_id 列的表，ID 列仍然会被加前缀防止冲突"""
+        repo = _make_novel_repo()
+        service = NovelBackupService(novel_repository=repo)
+
+        backup = {
+            "version": "1.0",
+            "novel_id": "old-1",
+            "tables": {
+                "assist_messages": [
+                    {"id": 1, "role": "user", "content": "hello"},
+                    {"id": 2, "role": "assistant", "content": "hi"},
+                ],
+            },
+        }
+        service._remap_novel_id_in_backup(backup, "old-1", "new-2")
+
+        # 整数 ID 保持不变（由 DataImporter 剥离后让 SQLite 自动生成新 rowid）
+        assert backup["tables"]["assist_messages"][0]["id"] == 1
+        assert backup["tables"]["assist_messages"][1]["id"] == 2
+        assert backup["tables"]["assist_messages"][0]["content"] == "hello"
+
+    def test_prefixes_global_ids_not_containing_novel_id(self):
+        """不含 novel_id 的全局 ID（如 fact-001、整数主键）被加前缀以跨实例唯一化"""
+        repo = _make_novel_repo()
+        service = NovelBackupService(novel_repository=repo)
+
+        backup = {
+            "version": "1.0",
+            "novel_id": "old-1",
+            "tables": {
+                "triples": [
+                    {"id": "fact-001", "novel_id": "old-1", "subject": "玄清"},
+                    {"id": "fact-002", "novel_id": "old-1", "subject": "叶无道"},
+                ],
+                "triple_provenance": [
+                    {"id": "prov-001", "triple_id": "fact-001", "novel_id": "old-1", "rule_id": "rule-xyz"},
+                ],
+                "ai_trace_spans": [
+                    {"id": 1, "trace_id": "t-1", "span_id": "span-100", "parent_span_id": None, "novel_id": "old-1"},
+                    {"id": 2, "trace_id": "t-1", "span_id": "span-101", "parent_span_id": "span-100", "novel_id": "old-1"},
+                ],
+            },
+        }
+        service._remap_novel_id_in_backup(backup, "old-1", "new-2")
+
+        # 字符串 ID 被加前缀
+        assert backup["tables"]["triples"][0]["id"] == "new-2_fact-001"
+        assert backup["tables"]["triples"][1]["id"] == "new-2_fact-002"
+
+        # FK 引用同步更新
+        prov = backup["tables"]["triple_provenance"][0]
+        assert prov["triple_id"] == "new-2_fact-001"
+        assert prov["rule_id"] == "new-2_rule-xyz"
+
+        # 整数 ID 保持不变（由 DataImporter 剥离后让 SQLite 自动生成新 rowid）
+        spans = backup["tables"]["ai_trace_spans"]
+        assert spans[0]["id"] == 1
+        assert spans[0]["span_id"] == "new-2_span-100"
+        assert spans[0]["novel_id"] == "new-2"
+        assert spans[1]["id"] == 2
+        assert spans[1]["span_id"] == "new-2_span-101"
+        assert spans[1]["parent_span_id"] == "new-2_span-100"  # FK 同步更新
+        assert spans[1]["novel_id"] == "new-2"
+
+    def test_does_not_prefix_values_without_id_suffix(self):
+        """非 ID 列（不以 _id 结尾）的普通字符串不加前缀"""
+        repo = _make_novel_repo()
+        service = NovelBackupService(novel_repository=repo)
+
+        backup = {
+            "version": "1.0",
+            "novel_id": "old-1",
+            "tables": {
+                "triples": [
+                    {"id": "fact-001", "novel_id": "old-1", "subject": "玄清", "object": "阴阳街"},
+                ],
+            },
+        }
+        service._remap_novel_id_in_backup(backup, "old-1", "new-2")
+
+        row = backup["tables"]["triples"][0]
+        assert row["id"] == "new-2_fact-001"      # ID 列加了前缀
+        assert row["novel_id"] == "new-2"          # novel_id 在第一阶段替换
+        assert row["subject"] == "玄清"             # 普通字符串不变
+        assert row["object"] == "阴阳街"            # 普通字符串不变
+
+
+# ============================================================
+#  restore_as_new_novel 测试
+# ============================================================
+
+
+class TestRestoreAsNewNovel:
+    """测试 restore_as_new_novel 跨实例导入方法"""
+
+    def test_creates_novel_and_returns_new_id(self):
+        """从备份 ZIP 创建新小说，返回新 novel_id 和统计"""
+        repo = _make_novel_repo()
+        service = NovelBackupService(novel_repository=repo)
+
+        backup_data = _make_backup_data("old-novel-1")
+        # 确保 novels 表有数据
+        backup_data.tables["novels"] = [
+            {
+                "id": "old-novel-1",
+                "slug": "old-novel-1",
+                "title": "测试小说",
+                "author": "测试作者",
+                "target_chapters": 100,
+                "premise": "测试梗概",
+                "generation_prefs_json": '{"locked_genre":"奇幻"}',
+            }
+        ]
+        data_json = json.dumps(
+            backup_data.to_dict(), ensure_ascii=False, default=str, indent=2
+        )
+
+        zip_bytes_io = io.BytesIO()
+        with zipfile.ZipFile(zip_bytes_io, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("data.json", data_json)
+
+        with patch(
+            "application.core.services.novel_backup_service.get_database"
+        ):
+            with patch.object(
+                service._data_importer,
+                "restore_from_json",
+                return_value={"tables": 3, "total_rows": 6},
+            ) as mock_restore:
+                with patch.object(
+                    service, "_import_chromadb_vectors", return_value=0
+                ):
+                    result = service.restore_as_new_novel(
+                        zip_bytes_io.getvalue()
+                    )
+
+        assert "novel_id" in result
+        assert result["novel_id"].startswith("novel-")
+        assert result["stats"]["tables"] == 3
+        # 验证调用的是重映射后的 novel_id
+        mock_restore.assert_called_once()
+        called_novel_id = mock_restore.call_args[0][2]
+        assert called_novel_id == result["novel_id"]
+
+    def test_raises_when_data_json_missing(self):
+        """ZIP 中缺少 data.json 时抛出 ValueError"""
+        repo = _make_novel_repo()
+        service = NovelBackupService(novel_repository=repo)
+
+        zip_bytes_io = io.BytesIO()
+        with zipfile.ZipFile(zip_bytes_io, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("other.txt", "not data.json")
+
+        with pytest.raises(ValueError, match="缺少 data.json"):
+            service.restore_as_new_novel(zip_bytes_io.getvalue())
+
+    def test_raises_when_no_novel_in_backup(self):
+        """备份数据中无 novel 记录时抛出 ValueError"""
+        repo = _make_novel_repo()
+        service = NovelBackupService(novel_repository=repo)
+
+        backup_data = _make_backup_data("old-1")
+        # 不添加 novels 表
+        data_json = json.dumps(
+            backup_data.to_dict(), ensure_ascii=False, default=str, indent=2
+        )
+
+        zip_bytes_io = io.BytesIO()
+        with zipfile.ZipFile(zip_bytes_io, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("data.json", data_json)
+
+        with pytest.raises(ValueError, match="缺少 novel 记录"):
+            service.restore_as_new_novel(zip_bytes_io.getvalue())
+
+    def test_imports_vectors_when_present(self):
+        """ZIP 包含 chromadb/ 目录时导入向量"""
+        repo = _make_novel_repo()
+        service = NovelBackupService(novel_repository=repo)
+
+        backup_data = _make_backup_data("old-1")
+        backup_data.tables["novels"] = [
+            {
+                "id": "old-1",
+                "slug": "old-1",
+                "title": "测试",
+                "author": "作者",
+                "target_chapters": 50,
+                "premise": "",
+                "generation_prefs_json": "{}",
+            }
+        ]
+        data_json = json.dumps(
+            backup_data.to_dict(), ensure_ascii=False, default=str, indent=2
+        )
+
+        zip_bytes_io = io.BytesIO()
+        with zipfile.ZipFile(zip_bytes_io, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("data.json", data_json)
+            zf.writestr("chromadb/novel_old-1_chunks.json", '{"ids": ["v1"]}')
+
+        with patch(
+            "application.core.services.novel_backup_service.get_database"
+        ):
+            with patch.object(
+                service._data_importer,
+                "restore_from_json",
+                return_value={"tables": 2, "total_rows": 2},
+            ):
+                with patch.object(
+                    service, "_import_chromadb_vectors", return_value=1
+                ) as mock_vectors:
+                    result = service.restore_as_new_novel(
+                        zip_bytes_io.getvalue()
+                    )
+
+        assert result["stats"]["vectors"] == 1
+        mock_vectors.assert_called_once()

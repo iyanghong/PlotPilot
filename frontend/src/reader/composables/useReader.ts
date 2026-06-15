@@ -32,7 +32,8 @@ export function useReader(novelId: string) {
   const toc = ref<ChapterMeta[]>([])
   const currentChapter = ref<ChapterContent | null>(null)
   const currentIndex = ref(0)
-  const loading = ref(false)
+  /** 初始为 true，确保首屏渲染时立即显示加载动画而非空状态 */
+  const loading = ref(true)
   const error = ref<string | null>(null)
 
   const totalChapters = computed(() => toc.value.length)

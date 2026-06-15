@@ -3,7 +3,6 @@
   <n-modal
     v-model:show="visible"
     preset="card"
-    :title="null"
     :style="{ width: '92vw', maxWidth: '960px', height: '80vh', marginTop: '8vh' }"
     :bordered="true"
     :segmented="{ content: true, footer: 'soft' }"
@@ -114,16 +113,9 @@
         >
           填充到表单
         </n-button>
-        <n-button
-          type="default"
-          block
-          :loading="generatingFields"
-          :disabled="messages.length === 0"
-          @click="handleGenerateFields"
-          style="margin-top: 8px"
-        >
-          生成字段
-        </n-button>
+        <div v-if="autoExtracting" style="font-size: 11px; color: var(--app-text-muted); margin-top: 8px; text-align: center;">
+          提取中...
+        </div>
       </div>
     </div>
 
@@ -188,9 +180,9 @@ const sessionId = ref<string | null>(null)
 const messages = ref<AssistMessage[]>([])
 const inputMessage = ref('')
 const sending = ref(false)
-const generatingFields = ref(false)
 const streamingContent = ref('')
 const fieldData = ref<AssistFieldData>({} as AssistFieldData)
+const autoExtracting = ref(false)
 const chatContainerRef = ref<HTMLElement | null>(null)
 
 const strategyOptions = [
@@ -223,7 +215,7 @@ function scrollToBottom() {
 
 async function handleSend() {
   const text = inputMessage.value.trim()
-  if (!text || sending.value || generatingFields.value) return
+  if (!text || sending.value || autoExtracting.value) return
 
   inputMessage.value = ''
   sending.value = true
@@ -269,6 +261,8 @@ async function handleSend() {
         }
         streamingContent.value = ''
         sending.value = false
+        // 每次 AI 回复后自动提取字段
+        autoGenerateFields()
       },
       onError(err) {
         message.error(err)
@@ -279,9 +273,10 @@ async function handleSend() {
   )
 }
 
-async function handleGenerateFields() {
-  if (!sessionId.value || generatingFields.value) return
-  generatingFields.value = true
+/** 每次 AI 回复后自动提取字段（静默模式，不阻塞 UI） */
+function autoGenerateFields() {
+  if (!sessionId.value) return
+  autoExtracting.value = true
 
   subscribeAssist(
     {
@@ -292,11 +287,11 @@ async function handleGenerateFields() {
     {
       onFieldsDone(fields) {
         fieldData.value = fields
-        generatingFields.value = false
+        autoExtracting.value = false
       },
-      onError(err) {
-        message.error(err)
-        generatingFields.value = false
+      onError(_err) {
+        // 静默失败
+        autoExtracting.value = false
       },
     },
   )

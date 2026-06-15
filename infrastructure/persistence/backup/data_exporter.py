@@ -90,7 +90,15 @@ class DataExporter:
             direct_tables,
         )
 
-        # 2. 导出直接关联表数据
+        # 2. 导出 novels 表（使用 id 列而非 novel_id 列）
+        novel_rows = self._export_table_by_id(db, "novels", novel_id)
+        if novel_rows:
+            data.tables["novels"] = novel_rows
+            logger.info("导出表 novels: %d 行 (id=%s)", len(novel_rows), novel_id)
+        else:
+            logger.debug("未找到 novels 记录 (id=%s)", novel_id)
+
+        # 3. 导出直接关联表数据
         for table_name in direct_tables:
             rows = self._export_table_rows(db, table_name, novel_id)
             if rows:
@@ -101,7 +109,7 @@ class DataExporter:
             else:
                 logger.debug("跳过空表 %s (novel_id=%s)", table_name, novel_id)
 
-        # 3. 导出间接关联表数据
+        # 4. 导出间接关联表数据
         for table_name, (join_sql, params_fn) in _INDIRECT_TABLES.items():
             rows = self._export_indirect_table(
                 db, table_name, join_sql, params_fn, novel_id
@@ -198,6 +206,22 @@ class DataExporter:
         except Exception as e:
             logger.warning(
                 "导出表 %s 失败 (novel_id=%s): %s", table_name, novel_id, e
+            )
+            return []
+
+    def _export_table_by_id(
+        self, db, table_name: str, row_id: str
+    ) -> List[Dict[str, Any]]:
+        """SELECT * FROM {table} WHERE id = ? 并返回字典列表。
+
+        用于导出以 id 为主键、没有 novel_id 列的表（如 novels）。
+        """
+        try:
+            sql = f'SELECT * FROM "{table_name}" WHERE id = ?'
+            return db.fetch_all(sql, (row_id,))
+        except Exception as e:
+            logger.warning(
+                "导出表 %s 失败 (id=%s): %s", table_name, row_id, e
             )
             return []
 

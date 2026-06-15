@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 
 from application.core.services.novel_backup_service import NovelBackupService
+from infrastructure.persistence.database.write_dispatch import sqlite_writes_bypass_queue
 from interfaces.api.dependencies import get_novel_repository
 
 router = APIRouter(prefix="/backup", tags=["backup"])
@@ -54,8 +55,34 @@ async def restore_novel_backup(
 
     try:
         zip_bytes = await file.read()
-        stats = backup_service.restore_from_zip(zip_bytes, novel_id)
+        # 绕过 Write Dispatch 直连 SQLite，保证大量写入能在一个事务内完成
+        with sqlite_writes_bypass_queue():
+            stats = backup_service.restore_from_zip(zip_bytes, novel_id)
         return {"success": True, "stats": stats}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导入失败: {str(e)}")
+
+
+@router.post("/restore")
+async def restore_as_new_novel(
+    file: UploadFile = File(...),
+    backup_service: NovelBackupService = Depends(get_backup_service),
+):
+    """从备份 ZIP 创建新小说（跨实例导入，小说不存在时使用）
+
+    从 ZIP 中提取小说元信息，自动生成新 novel_id 并导入全部数据。
+    """
+    if not file.filename or not file.filename.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="请上传 .zip 文件")
+
+    try:
+        zip_bytes = await file.read()
+        # 绕过 Write Dispatch 直连 SQLite，保证大量写入能在一个事务内完成
+        with sqlite_writes_bypass_queue():
+            result = backup_service.restore_as_new_novel(zip_bytes)
+        return {"success": True, "novel_id": result["novel_id"], "stats": result["stats"]}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
