@@ -35,7 +35,7 @@
         @change="handleImportBackup"
       >
         <n-button size="tiny" quaternary :loading="importing">
-          <template #icon><n-icon :component="UploadOutline" /></template>
+          <template #icon><n-icon :component="CloudUploadOutline" /></template>
           还原
         </n-button>
       </n-upload>
@@ -123,7 +123,7 @@
 import { onMounted, onUnmounted, computed, ref, watch, defineAsyncComponent, type ComponentPublicInstance } from 'vue'
 import { useRoute } from 'vue-router'
 import { useMessage } from 'naive-ui'
-import { DownloadOutline, UploadOutline } from '@vicons/ionicons5'
+import { DownloadOutline, CloudUploadOutline } from '@vicons/ionicons5'
 import { downloadBackup, uploadBackup } from '@/api/backup'
 import { useIsMobile } from '../composables/useIsMobile'
 import { useDebouncedTask } from '../composables/useDebouncedTask'
