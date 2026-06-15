@@ -57,9 +57,32 @@
 
     <!-- 右侧：操作按钮 -->
     <div class="top-bar-actions">
+      <!-- 备份按钮 -->
+      <n-dropdown
+        trigger="click"
+        placement="bottom-end"
+        :options="backupOptions"
+        @select="handleBackupSelect"
+      >
+        <div class="action-trigger" role="button" aria-label="数据备份">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20">
+            <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+          </svg>
+        </div>
+      </n-dropdown>
+
+      <!-- 隐藏的文件选择器用于还原 -->
+      <input
+        ref="restoreInputRef"
+        type="file"
+        accept=".zip"
+        style="display: none"
+        @change="handleRestoreFile"
+      />
+
       <!-- 导出按钮 -->
-      <n-dropdown 
-        trigger="click" 
+      <n-dropdown
+        trigger="click"
         placement="bottom-end"
         :options="exportOptions"
         @select="handleExport"
@@ -115,6 +138,7 @@ import { useRouter } from 'vue-router'
 import { NTooltip, NSpin, NDropdown, NButton, useMessage } from 'naive-ui'
 import { useStatsStore } from '@/stores/statsStore'
 import { novelApi } from '@/api/novel'
+import { downloadBackup, uploadBackup } from '@/api/backup'
 import GlobalLLMEntryButton from '@/components/global/GlobalLLMEntryButton.vue'
 import PromptPlazaEntryButton from '@/components/global/PromptPlazaEntryButton.vue'
 import { useAuthStore } from '@/stores/authStore'
@@ -168,6 +192,51 @@ const exportOptions = [
   { label: '📋 Markdown', key: 'markdown' },
   { label: '📄 TXT (纯文本)', key: 'txt' }
 ]
+
+// 备份选项
+const backupOptions = [
+  { label: '📦 下载备份 (ZIP)', key: 'download-backup' },
+  { label: '📥 从备份还原...', key: 'restore-backup' },
+]
+
+const restoreInputRef = ref<HTMLInputElement | null>(null)
+const backupLoading = ref(false)
+
+async function handleBackupSelect(key: string) {
+  if (key === 'download-backup') {
+    backupLoading.value = true
+    try {
+      await downloadBackup(props.slug)
+      message.success('备份导出完成')
+    } catch (e: any) {
+      message.error(e?.message || '备份导出失败')
+    } finally {
+      backupLoading.value = false
+    }
+  } else if (key === 'restore-backup') {
+    restoreInputRef.value?.click()
+  }
+}
+
+async function handleRestoreFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+
+  backupLoading.value = true
+  try {
+    const result = await uploadBackup(props.slug, file)
+    message.success(
+      `还原完成：${result.stats.tables} 张表，${result.stats.total_rows} 行数据`,
+    )
+  } catch (e: any) {
+    message.error(e?.message || '还原失败，请检查文件格式')
+  } finally {
+    backupLoading.value = false
+    // 清空 input，允许重复选择同一文件
+    input.value = ''
+  }
+}
 
 async function handleExport(format: string) {
   try {

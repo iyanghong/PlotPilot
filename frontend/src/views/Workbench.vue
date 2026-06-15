@@ -17,29 +17,7 @@
 
   <!-- 桌面端布局 -->
   <div v-else class="workbench">
-    <div class="wb-top-row">
-      <StatsTopBar :slug="slug" @open-settings="appSettingsShell.open()" />
-      <div class="wb-backup-actions">
-        <n-button
-          size="small"
-          :loading="exporting"
-          @click="handleExportBackup"
-        >
-          <template #icon><n-icon :component="DownloadOutline" /></template>
-          备份
-        </n-button>
-        <n-upload
-          :show-file-list="false"
-          accept=".zip"
-          @change="handleImportBackup"
-        >
-          <n-button size="small" :loading="importing">
-            <template #icon><n-icon :component="CloudUploadOutline" /></template>
-            还原
-          </n-button>
-        </n-upload>
-      </div>
-    </div>
+    <StatsTopBar :slug="slug" @open-settings="appSettingsShell.open()" />
 
     <n-spin :show="pageLoading" class="workbench-spin" description="加载工作台…">
       <div class="workbench-inner">
@@ -123,8 +101,6 @@
 import { onMounted, onUnmounted, computed, ref, watch, defineAsyncComponent, type ComponentPublicInstance } from 'vue'
 import { useRoute } from 'vue-router'
 import { useMessage } from 'naive-ui'
-import { DownloadOutline, CloudUploadOutline } from '@vicons/ionicons5'
-import { downloadBackup, uploadBackup } from '@/api/backup'
 import { useIsMobile } from '../composables/useIsMobile'
 import { useDebouncedTask } from '../composables/useDebouncedTask'
 import { useWorkbench } from '../composables/useWorkbench'
@@ -152,35 +128,6 @@ const ActPlanningModal = defineAsyncComponent(() => import('../components/workbe
 const { isMobile } = useIsMobile()
 const route = useRoute()
 const message = useMessage()
-
-const exporting = ref(false)
-const importing = ref(false)
-
-async function handleExportBackup() {
-  exporting.value = true
-  try {
-    await downloadBackup(slug.value)
-    message.success('备份导出完成')
-  } catch (e: any) {
-    message.error(e?.message || '导出失败')
-  } finally {
-    exporting.value = false
-  }
-}
-
-async function handleImportBackup({ file }: { file: any }) {
-  importing.value = true
-  try {
-    const result = await uploadBackup(slug.value, (file as any).file as File)
-    message.success(
-      `还原完成：${result.stats.tables} 张表，${result.stats.total_rows} 行数据`,
-    )
-  } catch (e: any) {
-    message.error(e?.message || '还原失败，请检查文件格式')
-  } finally {
-    importing.value = false
-  }
-}
 
 const statsStore = useStatsStore()
 const workbenchRefresh = useWorkbenchRefreshStore()
@@ -444,19 +391,4 @@ watch(
   color: var(--app-text-primary);
 }
 
-.wb-top-row {
-  display: flex;
-  align-items: center;
-}
-
-.wb-top-row :deep(.stats-top-bar) {
-  flex: 1;
-}
-
-.wb-backup-actions {
-  display: flex;
-  gap: 8px;
-  padding-right: 12px;
-  flex-shrink: 0;
-}
 </style>
