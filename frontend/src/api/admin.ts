@@ -83,48 +83,46 @@ export const adminApi = {
     const res = await apiClient.get<{ success: boolean; data: DashboardData }>(
       `/admin/dashboard?scope=${scope}`
     )
-    return res.data.data
+    return res.data
   },
 
   /** 列出用户（分页、搜索） */
-  async listUsers(params: { page?: number; page_size?: number; search?: string } = {}) {
-    const res = await apiClient.get<PaginatedData<UserDTO>>('/admin/users', { params })
-    return res.data
+  async listUsers(params: { page?: number; page_size?: number; search?: string } = {}): Promise<PaginatedData<UserDTO>> {
+    return apiClient.get<PaginatedData<UserDTO>>('/admin/users', { params })
   },
 
   /** 创建用户 */
   async createUser(body: { username: string; password: string; role?: string }) {
-    const res = await apiClient.post('/admin/users', body)
-    return res.data
+    const res = await apiClient.post<{ success: boolean }>('/admin/users', body)
+    return res
   },
 
   /** 更新用户信息 */
   async updateUser(userId: string, body: { role?: string; password?: string }) {
-    const res = await apiClient.patch(`/admin/users/${userId}`, body)
-    return res.data
+    const res = await apiClient.patch<{ success: boolean }>(`/admin/users/${userId}`, body)
+    return res
   },
 
   /** 删除用户 */
   async deleteUser(userId: string) {
-    const res = await apiClient.delete(`/admin/users/${userId}`)
-    return res.data
+    const res = await apiClient.delete<{ success: boolean }>(`/admin/users/${userId}`)
+    return res
   },
 
   /** 列出书籍（分页、筛选） */
-  async listBooks(params: { page?: number; page_size?: number; search?: string; user_id?: string; stage?: string } = {}) {
-    const res = await apiClient.get<PaginatedData<BookDTO>>('/admin/books', { params })
-    return res.data
+  async listBooks(params: { page?: number; page_size?: number; search?: string; user_id?: string; stage?: string } = {}): Promise<PaginatedData<BookDTO>> {
+    return apiClient.get<PaginatedData<BookDTO>>('/admin/books', { params })
   },
 
   /** 删除书籍 */
   async deleteBook(novelId: string) {
-    const res = await apiClient.delete(`/admin/books/${novelId}`)
-    return res.data
+    const res = await apiClient.delete<{ success: boolean }>(`/admin/books/${novelId}`)
+    return res
   },
 
   /** 转移书籍所有权 */
   async transferBookOwner(novelId: string, userId: string) {
-    const res = await apiClient.patch(`/admin/books/${novelId}/owner`, { user_id: userId })
-    return res.data
+    const res = await apiClient.patch<{ success: boolean }>(`/admin/books/${novelId}/owner`, { user_id: userId })
+    return res
   },
 }
