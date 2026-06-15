@@ -17,28 +17,28 @@
 
   <!-- 桌面端布局 -->
   <div v-else class="workbench">
-    <StatsTopBar :slug="slug" @open-settings="appSettingsShell.open()" />
-
-    <div class="wb-backup-actions">
-      <n-button
-        size="tiny"
-        quaternary
-        :loading="exporting"
-        @click="handleExportBackup"
-      >
-        <template #icon><n-icon :component="DownloadOutline" /></template>
-        备份
-      </n-button>
-      <n-upload
-        :show-file-list="false"
-        accept=".zip"
-        @change="handleImportBackup"
-      >
-        <n-button size="tiny" quaternary :loading="importing">
-          <template #icon><n-icon :component="CloudUploadOutline" /></template>
-          还原
+    <div class="wb-top-row">
+      <StatsTopBar :slug="slug" @open-settings="appSettingsShell.open()" />
+      <div class="wb-backup-actions">
+        <n-button
+          size="small"
+          :loading="exporting"
+          @click="handleExportBackup"
+        >
+          <template #icon><n-icon :component="DownloadOutline" /></template>
+          备份
         </n-button>
-      </n-upload>
+        <n-upload
+          :show-file-list="false"
+          accept=".zip"
+          @change="handleImportBackup"
+        >
+          <n-button size="small" :loading="importing">
+            <template #icon><n-icon :component="CloudUploadOutline" /></template>
+            还原
+          </n-button>
+        </n-upload>
+      </div>
     </div>
 
     <n-spin :show="pageLoading" class="workbench-spin" description="加载工作台…">
@@ -351,7 +351,6 @@ watch(
 
 <style scoped>
 .workbench {
-  position: relative;
   height: 100vh;
   min-height: 0;
   max-height: 100vh;
@@ -445,12 +444,19 @@ watch(
   color: var(--app-text-primary);
 }
 
-.wb-backup-actions {
-  position: absolute;
-  top: 8px;
-  right: 12px;
+.wb-top-row {
   display: flex;
-  gap: 4px;
-  z-index: 10;
+  align-items: center;
+}
+
+.wb-top-row :deep(.stats-top-bar) {
+  flex: 1;
+}
+
+.wb-backup-actions {
+  display: flex;
+  gap: 8px;
+  padding-right: 12px;
+  flex-shrink: 0;
 }
 </style>
