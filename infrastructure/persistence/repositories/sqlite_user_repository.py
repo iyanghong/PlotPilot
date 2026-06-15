@@ -64,6 +64,18 @@ class SqliteUserRepository(UserRepository):
         row = self.db.fetch_one(sql)
         return row["cnt"] if row else 0
 
+    def list_all(self) -> list[User]:
+        """列出所有用户"""
+        sql = "SELECT * FROM users ORDER BY created_at DESC"
+        rows = self.db.fetch_all(sql)
+        return [self._row_to_user(row) for row in rows]
+
+    def delete(self, user_id: str) -> None:
+        """删除用户"""
+        sql = "DELETE FROM users WHERE id = ?"
+        self.db.execute(sql, (user_id,))
+        self.db.get_connection().commit()
+
     @staticmethod
     def _row_to_user(row: dict) -> User:
         """将数据库行转换为 User 实体"""
