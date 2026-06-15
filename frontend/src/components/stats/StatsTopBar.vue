@@ -34,6 +34,30 @@
       </n-dropdown>
     </div>
 
+    <!-- 书名（点击可编辑） -->
+    <div class="topbar-title">
+      <n-input
+        v-if="editingTitle"
+        ref="titleInputRef"
+        v-model:value="editTitleValue"
+        size="small"
+        class="title-edit-input"
+        @keyup.enter="saveTitle"
+        @blur="saveTitle"
+      />
+      <n-tooltip v-else trigger="hover" :show-arrow="false">
+        <template #trigger>
+          <span class="book-title-display" @click="startEditTitle" role="button" tabindex="0" aria-label="点击编辑书名">
+            {{ props.title || props.slug }}
+            <svg class="title-edit-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="12" height="12">
+              <path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+            </svg>
+          </span>
+        </template>
+        <span>点击编辑书名</span>
+      </n-tooltip>
+    </div>
+
     <!-- 中间：统计数据 -->
     <div class="topbar-center">
       <div
@@ -133,9 +157,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { NTooltip, NSpin, NDropdown, NButton, useMessage } from 'naive-ui'
+import { NTooltip, NSpin, NDropdown, NButton, NInput, useMessage } from 'naive-ui'
 import { useStatsStore } from '@/stores/statsStore'
 import { novelApi } from '@/api/novel'
 import { downloadBackup, uploadBackup } from '@/api/backup'
@@ -148,13 +172,42 @@ const props = defineProps<{
   title?: string
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   'open-settings': []
+  'update:title': [title: string]
 }>()
 
 const message = useMessage()
 const router = useRouter()
 const authStore = useAuthStore()
+
+// ── 书名内联编辑 ────────────────────────────────
+const editingTitle = ref(false)
+const editTitleValue = ref('')
+const titleInputRef = ref<HTMLInputElement | null>(null)
+
+function startEditTitle() {
+  editTitleValue.value = props.title || ''
+  editingTitle.value = true
+  nextTick(() => {
+    titleInputRef.value?.focus()
+  })
+}
+
+async function saveTitle() {
+  if (!editingTitle.value) return
+  const newTitle = editTitleValue.value.trim()
+  editingTitle.value = false
+  if (!newTitle || newTitle === (props.title || '')) return
+
+  try {
+    await novelApi.updateNovel(props.slug, { title: newTitle })
+    emit('update:title', newTitle)
+    message.success('书名已更新')
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || '书名更新失败')
+  }
+}
 
 // AI 工具组件引用（用于以编程方式触发各组件内部按钮）
 const llmRef = ref<{ $el: HTMLElement } | null>(null)
@@ -420,6 +473,50 @@ onMounted(loadStats)
   box-shadow:
     var(--app-shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.08)),
     0 4px 16px var(--color-brand-border, rgba(79, 70, 229, 0.08));
+}
+
+/* 书名（点击可编辑） */
+.topbar-title {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  max-width: 200px;
+  min-width: 0;
+}
+
+.book-title-display {
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background 0.15s;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--nav-hero-text, #ffffff);
+}
+
+.book-title-display:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.title-edit-icon {
+  opacity: 0;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.book-title-display:hover .title-edit-icon {
+  opacity: 0.6;
+}
+
+.title-edit-input {
+  width: 180px;
 }
 
 /* 左侧：AI 控制台入口 */

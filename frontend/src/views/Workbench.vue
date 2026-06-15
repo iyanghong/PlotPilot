@@ -17,7 +17,7 @@
 
   <!-- 桌面端布局 -->
   <div v-else class="workbench">
-    <StatsTopBar :slug="slug" :title="bookTitle" @open-settings="appSettingsShell.open()" />
+    <StatsTopBar :slug="slug" :title="bookTitle" @open-settings="appSettingsShell.open()" @update:title="onBookTitleUpdate" />
 
     <n-spin :show="pageLoading" class="workbench-spin" description="加载工作台…">
       <div class="workbench-inner">
@@ -242,6 +242,10 @@ async function syncChapterFromRoute() {
   if (n != null) {
     await goToChapter(n)
   }
+}
+
+function onBookTitleUpdate(newTitle: string) {
+  bookTitle.value = newTitle
 }
 
 function onGenerationPrefsUpdated() {

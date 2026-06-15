@@ -3,8 +3,9 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { NCard, NButton, NPopconfirm, NTag, NSpace, NInput, NGi, NGrid, NEmpty, NSelect, NIcon, useMessage } from 'naive-ui'
-import { AddOutline, BookOutline, OpenOutline, TrashOutline } from '@vicons/ionicons5'
+import { AddOutline, BookOutline, CreateOutline, OpenOutline, TrashOutline } from '@vicons/ionicons5'
 import { adminApi, type BookDTO } from '@/api/admin'
+import { novelApi } from '@/api/novel'
 import { useIsMobile } from '@/composables/useIsMobile'
 
 const router = useRouter()
@@ -58,6 +59,34 @@ function goWorkbench(book: BookDTO) {
   router.push(`/book/${book.slug}/workbench`)
 }
 
+// ── 书名内联编辑 ────────────────────────────────
+/** 正在编辑的书籍 ID，null 表示未在编辑 */
+const editingBookId = ref<string | null>(null)
+const editTitleValue = ref('')
+
+function startEditTitle(book: BookDTO) {
+  editingBookId.value = book.id
+  editTitleValue.value = book.title
+}
+
+async function saveTitle(book: BookDTO) {
+  const newTitle = editTitleValue.value.trim()
+  editingBookId.value = null
+  if (!newTitle || newTitle === book.title) return
+
+  try {
+    await novelApi.updateNovel(book.id, { title: newTitle })
+    message.success('书名已更新')
+    loadBooks()
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || '书名更新失败')
+  }
+}
+
+function cancelEditTitle() {
+  editingBookId.value = null
+}
+
 onMounted(loadBooks)
 </script>
 
@@ -105,7 +134,28 @@ onMounted(loadBooks)
 
             <!-- 右侧信息 -->
             <div class="book-info">
-              <div class="book-title" :title="book.title">{{ book.title }}</div>
+              <div class="book-title-row" @click.stop>
+                <n-input
+                  v-if="editingBookId === book.id"
+                  v-model:value="editTitleValue"
+                  size="small"
+                  class="book-title-input"
+                  @keyup.enter="saveTitle(book)"
+                  @blur="cancelEditTitle"
+                />
+                <template v-else>
+                  <span class="book-title" :title="book.title">{{ book.title }}</span>
+                  <n-button
+                    size="tiny"
+                    text
+                    class="book-title-edit-btn"
+                    @click.stop="startEditTitle(book)"
+                    title="编辑书名"
+                  >
+                    <template #icon><n-icon :size="14"><CreateOutline /></n-icon></template>
+                  </n-button>
+                </template>
+              </div>
               <div class="book-meta">
                 <span class="book-author">{{ book.author }}</span>
               </div>
@@ -180,13 +230,31 @@ onMounted(loadBooks)
   flex: 1;
   min-width: 0;
 }
+.book-title-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 2px;
+  min-width: 0;
+}
 .book-title {
   font-size: 15px;
   font-weight: 600;
-  margin-bottom: 2px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.book-title-edit-btn {
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.book-title-row:hover .book-title-edit-btn {
+  opacity: 1;
+}
+.book-title-input {
+  flex: 1;
+  min-width: 0;
 }
 .book-meta {
   font-size: 12px;
