@@ -119,6 +119,19 @@ class AutopilotRecoveryPolicy:
             )
 
         if stage == NovelStage.COMPLETED.value:
+            # 已完成的小说重新启动：根据结构状态重定向到合适的活跃阶段
+            if for_start:
+                next_stage = self._next_stage_after_completed(novel_id)
+                story_pipeline = self._is_story_pipeline_writing_enabled()
+                return AutopilotRecoveryDecision(
+                    novel_id=novel_id,
+                    next_stage=next_stage,
+                    discard_transient_invocations=True,
+                    clear_stop_signal=True,
+                    clear_pending_invocation=True,
+                    story_pipeline_mode=story_pipeline,
+                    reason="restart_from_completed",
+                )
             return AutopilotRecoveryDecision(
                 novel_id=novel_id,
                 next_stage=stage,
@@ -190,6 +203,20 @@ class AutopilotRecoveryPolicy:
             if self._macro_structure_exists(novel_id):
                 return NovelStage.ACT_PLANNING.value
             return NovelStage.MACRO_PLANNING.value
+        if self._current_uncompleted_chapter_number(novel_id) is not None and self._macro_structure_exists(novel_id):
+            return NovelStage.WRITING.value
+        if self._macro_structure_exists(novel_id):
+            return NovelStage.ACT_PLANNING.value
+        return NovelStage.MACRO_PLANNING.value
+
+    def _next_stage_after_completed(self, novel_id: str) -> str:
+        """已完成小说重新启动时，根据结构状态决定从哪个阶段继续。
+
+        优先级：
+        1. 有未完成章节 + 宏观结构存在 → WRITING（继续写未完成章节）
+        2. 宏观结构存在 → ACT_PLANNING（规划新章节）
+        3. 无结构 → MACRO_PLANNING（从头规划）
+        """
         if self._current_uncompleted_chapter_number(novel_id) is not None and self._macro_structure_exists(novel_id):
             return NovelStage.WRITING.value
         if self._macro_structure_exists(novel_id):

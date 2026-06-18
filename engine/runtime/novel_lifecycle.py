@@ -103,6 +103,17 @@ async def process_novel(host: Any, novel: Novel) -> None:
         elif novel.current_stage == NovelStage.AUDITING:
             logger.info("[%s] 开始审计", novel.novel_id)
             await run_chapter_audit(host, novel)
+        elif novel.current_stage == NovelStage.COMPLETED:
+            # 安全网：COMPLETED 阶段不应出现在活跃的守护进程轮询中。
+            # 正常路径由 AutopilotRecoveryPolicy 在启动时重定向到活跃阶段，
+            # 此处兜底防止直接改库等异常路径导致空转。
+            logger.warning(
+                "[%s] 已完成小说仍在运行中，可能是异常状态，自动停止以避免空转",
+                novel.novel_id,
+            )
+            novel.autopilot_status = AutopilotStatus.STOPPED
+            host._save_novel_state(novel)
+            return
         elif novel.current_stage == NovelStage.PAUSED_FOR_REVIEW:
             if getattr(novel, "auto_approve_mode", False):
                 logger.info("[%s] 全自动模式：跳过人工审阅", novel.novel_id)
