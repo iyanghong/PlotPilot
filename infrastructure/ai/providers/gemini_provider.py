@@ -1,14 +1,15 @@
-"""Gemini LLM 提供商实现（官方 generateContent / streamGenerateContent 协议）"""
+"""Gemini LLM 提供商实现（官方 generateContent / streamGenerateContent 协议，支持多轮 messages 和工具调用）"""
 from __future__ import annotations
 
 import json
 import logging
+import uuid
 from typing import Any, AsyncIterator
 
 import httpx
 
 from domain.ai.services.llm_service import GenerationConfig, GenerationResult
-from domain.ai.value_objects.prompt import Prompt
+from domain.ai.value_objects.prompt import Prompt, ToolCall
 from domain.ai.value_objects.token_usage import TokenUsage
 from infrastructure.ai.config.settings import Settings
 from infrastructure.ai.http_timeout import build_httpx_timeout
@@ -51,16 +52,21 @@ class GeminiProvider(BaseProvider):
         response.raise_for_status()
         data = response.json()
 
-        content = self._extract_text(data)
-        if not content.strip():
-            raise RuntimeError('Gemini returned empty content')
+        content, tool_calls = self._extract_response(data)
+        if not content.strip() and not tool_calls:
+            raise RuntimeError('Gemini returned empty content and no tool calls')
 
         usage = data.get('usageMetadata') or {}
         token_usage = TokenUsage(
             input_tokens=int(usage.get('promptTokenCount') or 0),
             output_tokens=int(usage.get('candidatesTokenCount') or 0),
         )
-        return GenerationResult(content=content, token_usage=token_usage)
+        return GenerationResult(
+            content=content,
+            token_usage=token_usage,
+            tool_calls=tool_calls,
+            finish_reason="tool_calls" if tool_calls else "stop",
+        )
 
     async def stream_generate(self, prompt: Prompt, config: GenerationConfig) -> AsyncIterator[str]:
         model_id = require_resolved_model_id(
@@ -129,15 +135,42 @@ class GeminiProvider(BaseProvider):
                 if schema:
                     generation_config["responseSchema"] = schema
 
+        # 构建 contents — 优先多轮 messages 数组，回退到 prompt.user
+        if prompt.messages:
+            contents = []
+            for m in prompt.messages:
+                entry: dict[str, Any] = {"role": m.role, "parts": [{"text": m.content}]}
+                # 将 assistant 的 tool_calls 转为 Gemini functionCall 格式
+                if m.tool_calls:
+                    entry["parts"] = [
+                        {"functionCall": {"name": tc.name, "args": tc.arguments}}
+                        for tc in m.tool_calls
+                    ]
+                # 将 tool 角色的回复转为 Gemini functionResponse 格式
+                if m.role == "tool" and m.tool_call_id:
+                    entry["parts"] = [{
+                        "functionResponse": {
+                            "name": m.tool_call_id.split("_")[0] if "_" in (m.tool_call_id or "") else "",
+                            "response": {"result": m.content},
+                        }
+                    }]
+                contents.append(entry)
+        else:
+            contents = [{"role": "user", "parts": [{"text": prompt.user}]}]
+
         payload: dict[str, Any] = {
-            'contents': [
-                {
-                    'role': 'user',
-                    'parts': [{'text': prompt.user}],
-                }
-            ],
+            'contents': contents,
             'generationConfig': generation_config,
         }
+
+        # 透传 tools 参数（Gemini functionDeclarations 格式）
+        if prompt.tools:
+            payload["tools"] = [{
+                "functionDeclarations": [
+                    {"name": t.name, "description": t.description, "parameters": t.parameters}
+                    for t in prompt.tools
+                ]
+            }]
         if prompt.system.strip():
             payload['systemInstruction'] = {
                 'parts': [{'text': prompt.system}],
@@ -149,17 +182,33 @@ class GeminiProvider(BaseProvider):
         payload.update(extra_body)
         return payload
 
-    def _extract_text(self, data: dict[str, Any]) -> str:
+    def _extract_response(self, data: dict[str, Any]) -> tuple[str, list[ToolCall]]:
+        """从 Gemini 响应中提取文本和工具调用"""
         pieces: list[str] = []
+        tool_calls: list[ToolCall] = []
         for candidate in data.get('candidates') or []:
             content = candidate.get('content') or {}
             for part in content.get('parts') or []:
                 if part.get('thought') is True:
                     continue
+                # functionCall → 统一 ToolCall 格式
+                fc = part.get('functionCall')
+                if fc:
+                    tool_calls.append(ToolCall(
+                        id=f"{fc.get('name', 'unknown')}_{uuid.uuid4().hex[:8]}",
+                        name=fc.get('name', ''),
+                        arguments=dict(fc.get('args') or {}),
+                    ))
+                    continue
                 text = part.get('text')
                 if text:
                     pieces.append(str(text))
-        return ''.join(pieces)
+        return ''.join(pieces), tool_calls
+
+    def _extract_text(self, data: dict[str, Any]) -> str:
+        """从 Gemini 响应中提取纯文本（向后兼容流式路径）"""
+        text, _ = self._extract_response(data)
+        return text
 
     def _parse_sse_event(self, event_text: str) -> str:
         data_lines: list[str] = []
