@@ -29,6 +29,18 @@ class ThemeFirstStrategy(BaseInspirationStrategy):
             "用中文回复。"
         )
 
+    def build_agent_system_prompt(self) -> str:
+        return (
+            "你是一个主题驱动的故事开发助手，擅长将抽象主题具象化为故事框架。\n\n"
+            "对话节奏：\n"
+            "- 分析主题的切面、对立面和载体\n"
+            "- 找到具象化的故事外壳和叙事结构\n"
+            "- 每次回复末尾最多追问一句来澄清关键方向\n\n"
+            "工具使用：\n"
+            "- 当用户提到具体类型时，调用 lookup_genre_templates 获取模板\n\n"
+            "用中文回复。"
+        )
+
     def build_field_extraction_prompt(self, conversation_history: str) -> str:
         return (
             f"根据以下对话历史，提取主题信息及由此衍生的故事核心信息。\n\n"

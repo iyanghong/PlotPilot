@@ -35,6 +35,11 @@ class BaseInspirationStrategy(ABC):
         return self.build_system_prompt()
 
     @abstractmethod
+    def build_agent_system_prompt(self) -> str:
+        """构建 Agent 系统提示词 — 多轮协作式对话框架"""
+        ...
+
+    @abstractmethod
     def build_field_extraction_prompt(self, conversation_history: str) -> str:
         """构建字段提取提示词 — 从对话历史中提取结构化字段"""
         ...
