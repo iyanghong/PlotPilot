@@ -150,7 +150,7 @@ class GeminiProvider(BaseProvider):
                 if m.role == "tool" and m.tool_call_id:
                     entry["parts"] = [{
                         "functionResponse": {
-                            "name": m.tool_call_id.split("_")[0] if "_" in (m.tool_call_id or "") else "",
+                            "name": m.tool_call_id.split("::")[0] if "::" in (m.tool_call_id or "") else "",
                             "response": {"result": m.content},
                         }
                     }]
@@ -195,7 +195,7 @@ class GeminiProvider(BaseProvider):
                 fc = part.get('functionCall')
                 if fc:
                     tool_calls.append(ToolCall(
-                        id=f"{fc.get('name', 'unknown')}_{uuid.uuid4().hex[:8]}",
+                        id=f"{fc.get('name', 'unknown')}::{uuid.uuid4().hex[:8]}",
                         name=fc.get('name', ''),
                         arguments=dict(fc.get('args') or {}),
                     ))
