@@ -245,19 +245,38 @@ class AnthropicProvider(BaseProvider):
         *,
         stream: bool = False,
     ) -> tuple[str, dict[str, Any]]:
-        """构建 Messages API 请求体，供 generate / stream 共用。"""
+        """构建 Messages API 请求体，供 generate / stream 共用。
+
+        向后兼容：prompt.messages 为 None 时走旧路径（system + user）。
+        支持透传 prompt.tools 工具定义。
+        """
         model_id = require_resolved_model_id(
             config.model,
             self.settings.default_model,
             provider_label="Anthropic / Claude",
         )
+        # 构建 messages — 优先多轮 messages 数组
+        if prompt.messages:
+            messages = [
+                {"role": m.role, "content": m.content}
+                for m in prompt.messages
+            ]
+        else:
+            messages = [{"role": "user", "content": prompt.user}]
+
         payload: dict[str, Any] = {
             "model": model_id,
             "max_tokens": config.max_tokens,
             "temperature": config.temperature,
             "system": prompt.system,
-            "messages": [{"role": "user", "content": prompt.user}],
+            "messages": messages,
         }
+        # 透传 tools 参数
+        if prompt.tools:
+            payload["tools"] = [
+                {"name": t.name, "description": t.description, "input_schema": t.parameters}
+                for t in prompt.tools
+            ]
         if stream:
             payload["stream"] = True
         payload.update(self.settings.extra_body or {})
