@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import uuid
 from functools import lru_cache
@@ -13,6 +14,9 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 import yaml
 
 logger = logging.getLogger(__name__)
+
+# 灵感助手对话调试开关 — 设置 DEBUG_INSPIRE=true 即可在 INFO 级别打印完整对话日志
+_DEBUG_INSPIRE = os.getenv("DEBUG_INSPIRE", "").lower() in ("1", "true", "yes", "on")
 
 from domain.ai.value_objects.prompt import Prompt, Message
 from domain.assist.entities import (
@@ -237,6 +241,10 @@ class AssistService:
         """
         from infrastructure.ai.tool_registry import get_tool_registry
 
+        if _DEBUG_INSPIRE:
+            logger.info("╔══ 灵感助手对话开始 ══ session=%s strategy=%s", session.id, session.strategy.value)
+            logger.info("║ 用户输入: %s", user_message)
+
         # 1. 保存用户消息
         user_msg = InspireMessage(
             id=f"msg_{uuid.uuid4().hex[:12]}",
@@ -256,12 +264,31 @@ class AssistService:
         for m in history:
             messages.append(Message(role=m.role, content=m.content))
 
+        if _DEBUG_INSPIRE:
+            logger.info("╔══ 发送给 LLM 的上下文（共 %d 条消息，%d 个工具定义）══", len(messages), len(tool_defs))
+            for i, msg in enumerate(messages):
+                # 截断过长的内容以便阅读
+                content_preview = msg.content if len(msg.content) <= 500 else msg.content[:500] + "...(截断)"
+                logger.info("║ [%d] role=%s content=%s", i, msg.role, content_preview)
+            if tool_defs:
+                logger.info("║ 工具定义: %s", [td.name for td in tool_defs])
+            logger.info("╚══ 上下文结束 ══")
+
         # 3. Agent 循环（最多 5 轮，最多 3 次工具调用）
         full_content = ""
         tool_call_count = 0
 
-        for _ in range(5):
+        for loop_idx in range(5):
+            if _DEBUG_INSPIRE:
+                logger.info("── Agent 循环第 %d 轮 ──", loop_idx + 1)
+
             result = await self._llm.generate_with_tools(messages, tool_defs)
+
+            if _DEBUG_INSPIRE:
+                logger.info("LLM finish_reason=%s, tool_calls=%d, content_len=%d",
+                            result.finish_reason, len(result.tool_calls or []), len(result.content or ""))
+                if result.content and not result.tool_calls:
+                    logger.info("⚠️  第1次调用(非流式)返回文本: %.300s...", result.content)
 
             # 分支 A：LLM 要调工具
             if result.tool_calls:
@@ -270,10 +297,16 @@ class AssistService:
                     if tool_call_count > 3:
                         break
 
+                    if _DEBUG_INSPIRE:
+                        logger.info("🔧 工具调用: name=%s args=%s", tc.name, tc.arguments)
+
                     yield {"type": "tool_call", "name": tc.name, "args": tc.arguments}
 
                     tool_result = await tool_registry.execute(tc.name, tc.arguments)
                     summary = tool_result[:200]
+
+                    if _DEBUG_INSPIRE:
+                        logger.info("📋 工具结果: name=%s summary=%s", tc.name, summary)
 
                     yield {"type": "tool_result", "name": tc.name, "summary": summary}
 
@@ -291,14 +324,15 @@ class AssistService:
                     continue
                 continue
 
-            # 分支 B：LLM 给出文本回复 — 流式输出
-            # 构建不含 tools 的 prompt 用于流式
-            stream_prompt = Prompt(
-                system="", user="", messages=messages, tools=None,
-            )
-            async for chunk in self._llm.stream_generate(stream_prompt):
-                full_content += chunk
-                yield {"type": "chat_chunk", "content": chunk}
+            # 分支 B：LLM 给出文本回复
+            # 直接使用 generate_with_tools 已返回的内容，避免二次调用 stream_generate
+            # 导致 LLM 对同一段上下文给出不同回答（"牛头不对马嘴"的根因）。
+            full_content = result.content
+            if full_content:
+                yield {"type": "chat_chunk", "content": full_content}
+
+            if _DEBUG_INSPIRE:
+                logger.info("💬 最终回复: %s", full_content)
 
             break
 
@@ -314,7 +348,12 @@ class AssistService:
 
         # 5. 判断消息类型
         is_question = full_content.strip().endswith("？") or full_content.strip().endswith("?")
-        yield {"type": "chat_done", "message_type": "question" if is_question else "suggestion"}
+        message_type = "question" if is_question else "suggestion"
+
+        if _DEBUG_INSPIRE:
+            logger.info("╚══ 对话结束 ══ message_type=%s", message_type)
+
+        yield {"type": "chat_done", "message_type": message_type}
 
     # ---- field extraction ----
 

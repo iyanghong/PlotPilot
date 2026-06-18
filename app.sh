@@ -4,7 +4,7 @@
 #
 #  用法: ./app.sh <command> [service...]
 #
-#  命令:
+#  生产命令（Docker Compose）:
 #    start    启动全部服务（或指定 backend / frontend）
 #    stop     停止全部服务（或指定 backend / frontend）
 #    restart  重启全部服务（或指定 backend / frontend）
@@ -12,16 +12,24 @@
 #    logs     查看服务日志（默认全部，可指定 backend / frontend）
 #    update   git pull → 重新构建镜像 → 重新启动（默认全部）
 #    build    重新构建镜像（不启动）
-#    help     显示此帮助
+#
+#  开发命令（本地直启，不依赖 Docker）:
+#    dev start    启动开发环境（后端 uvicorn + 前端 vite）
+#    dev start -log  启动并持续监听日志（Ctrl+C 退出）
+#    dev restart  重启开发环境（可指定 backend / frontend）
+#    dev stop     停止开发环境
+#    dev status   查看开发环境运行状态
+#    dev logs     查看开发环境日志（可指定 backend / frontend）
 #
 #  使用示例:
-#    ./app.sh start              # 启动前后端
-#    ./app.sh start backend      # 仅启动后端
+#    ./app.sh start              # 启动前后端（Docker）
+#    ./app.sh dev start          # 启动开发环境（本地直启）
+#    ./app.sh dev start backend  # 仅启动后端开发服务
 #    ./app.sh stop frontend      # 仅停止前端（保持后端运行）
-#    ./app.sh status             # 查看运行状态 + 健康检查
-#    ./app.sh logs backend       # 跟踪后端日志
-#    ./app.sh update             # 拉取最新代码，重建镜像，重启全部
-#    ./app.sh update backend     # 仅更新重建后端
+#    ./app.sh status             # 查看生产服务状态
+#    ./app.sh dev status         # 查看开发环境状态
+#    ./app.sh logs backend       # 跟踪生产容器日志
+#    ./app.sh dev logs backend   # 跟踪开发后端日志
 # ============================================================
 
 set -euo pipefail
@@ -60,7 +68,7 @@ _usage() {
 
 用法: ./app.sh <command> [service...]
 
-命令:
+生产命令（Docker Compose）:
   start    启动全部服务（或指定 backend / frontend）
   stop     停止全部服务（或指定 backend / frontend）
   restart  重启全部服务（或指定 backend / frontend）
@@ -68,16 +76,29 @@ _usage() {
   logs     查看服务日志（默认全部，可指定 backend / frontend）
   update   git pull → 重新构建镜像 → 重新启动（默认全部）
   build    重新构建镜像（不启动）
-  help     显示此帮助
+
+开发命令（本地直启，不依赖 Docker）:
+  dev start         启动开发环境（可指定 backend / frontend）
+  dev start -log    启动并持续监听日志（Ctrl+C 退出）
+  dev restart       重启开发环境（可指定 backend / frontend）
+  dev stop          停止开发环境（可指定 backend / frontend）
+  dev status        查看开发环境运行状态
+  dev logs          查看开发环境日志（可指定 backend / frontend）
 
 使用示例:
-  ./app.sh start              # 启动前后端
-  ./app.sh start backend      # 仅启动后端
-  ./app.sh stop frontend      # 仅停止前端（保持后端运行）
-  ./app.sh status             # 查看运行状态 + 健康检查
-  ./app.sh logs backend       # 跟踪后端日志
-  ./app.sh update             # 拉取最新代码，重建镜像，重启全部
-  ./app.sh update backend     # 仅更新重建后端
+  ./app.sh start              # 启动前后端（Docker）
+  ./app.sh dev start          # 启动开发环境（本地直启）
+  ./app.sh dev start backend  # 仅启动后端开发服务
+  ./app.sh dev start frontend # 仅启动前端开发服务
+  ./app.sh dev restart        # 重启全部开发服务
+  ./app.sh dev restart backend # 仅重启后端开发服务
+  ./app.sh dev start -log     # 启动并持续监听日志（Ctrl+C 退出）
+  ./app.sh dev stop backend   # 仅停止后端开发服务
+  ./app.sh stop frontend      # 仅停止生产前端（保持后端运行）
+  ./app.sh status             # 查看生产服务状态
+  ./app.sh dev status         # 查看开发环境状态
+  ./app.sh logs backend       # 跟踪生产容器日志
+  ./app.sh dev logs backend   # 跟踪开发后端日志
 
 HELP
     exit 0
@@ -276,6 +297,322 @@ cmd_build() {
 }
 
 # ============================================================
+#  开发环境（本地直启，不依赖 Docker）
+# ============================================================
+
+DEV_PID_DIR="${TMPDIR:-/tmp}/plotpilot-dev"
+DEV_LOG_DIR="${DEV_PID_DIR}/logs"
+DEV_BACKEND_PID_FILE="${DEV_PID_DIR}/backend.pid"
+DEV_FRONTEND_PID_FILE="${DEV_PID_DIR}/frontend.pid"
+DEV_BACKEND_LOG="${DEV_LOG_DIR}/backend.log"
+DEV_FRONTEND_LOG="${DEV_LOG_DIR}/frontend.log"
+
+# ── 确保开发环境目录存在 ──────────────────────────────────
+_init_dev_dirs() {
+    mkdir -p "$DEV_PID_DIR" "$DEV_LOG_DIR"
+}
+
+# ── 读 PID 文件 ──────────────────────────────────────────
+_read_pid() {
+    local pid_file="$1"
+    if [ -f "$pid_file" ]; then
+        cat "$pid_file"
+    fi
+}
+
+# ── 写 PID 文件 ──────────────────────────────────────────
+_write_pid() {
+    local pid_file="$1" pid="$2"
+    echo "$pid" > "$pid_file"
+}
+
+# ── 检查 PID 对应进程是否存活 ─────────────────────────────
+_pid_alive() {
+    local pid="$1"
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+# ── 检查开发环境依赖 ──────────────────────────────────────
+_check_dev_deps() {
+    local target="$1"  # backend / frontend / all
+
+    if [ "$target" = "backend" ] || [ "$target" = "all" ]; then
+        if [ ! -d "${SCRIPT_DIR}/.venv" ]; then
+            _err "缺少 Python 虚拟环境: ${SCRIPT_DIR}/.venv"
+            echo "  请先创建: python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt"
+            return 1
+        fi
+        if [ ! -f "${SCRIPT_DIR}/.env" ]; then
+            _warn "未找到 .env 文件，后端可能缺少 LLM API Key"
+        fi
+    fi
+
+    if [ "$target" = "frontend" ] || [ "$target" = "all" ]; then
+        if [ ! -d "${SCRIPT_DIR}/frontend/node_modules" ]; then
+            _err "缺少前端依赖: ${SCRIPT_DIR}/frontend/node_modules"
+            echo "  请先安装: cd frontend && npm install"
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# ── 启动后端开发服务 ─────────────────────────────────────
+_dev_start_backend() {
+    local pid
+    pid=$(_read_pid "$DEV_BACKEND_PID_FILE")
+
+    if _pid_alive "$pid"; then
+        _warn "后端开发服务已在运行 (pid=${pid})"
+        return 0
+    fi
+
+    _info "启动后端开发服务 → http://127.0.0.1:${BACKEND_PORT}"
+    (
+        cd "$SCRIPT_DIR"
+        source ".venv/bin/activate"
+        python -m uvicorn interfaces.main:app \
+            --host 127.0.0.1 --port "${BACKEND_PORT}" --reload \
+            >> "$DEV_BACKEND_LOG" 2>&1
+    ) &
+    _write_pid "$DEV_BACKEND_PID_FILE" "$!"
+    _ok "后端已启动 (pid=$!, 日志: ${DEV_BACKEND_LOG})"
+}
+
+# ── 启动前端开发服务 ─────────────────────────────────────
+_dev_start_frontend() {
+    local pid
+    pid=$(_read_pid "$DEV_FRONTEND_PID_FILE")
+
+    if _pid_alive "$pid"; then
+        _warn "前端开发服务已在运行 (pid=${pid})"
+        return 0
+    fi
+
+    _info "启动前端开发服务 → http://127.0.0.1:${FRONTEND_PORT}"
+    (
+        cd "${SCRIPT_DIR}/frontend"
+        npm run dev -- --host 127.0.0.1 --port "${FRONTEND_PORT}" \
+            >> "$DEV_FRONTEND_LOG" 2>&1
+    ) &
+    _write_pid "$DEV_FRONTEND_PID_FILE" "$!"
+    _ok "前端已启动 (pid=$!, 日志: ${DEV_FRONTEND_LOG})"
+}
+
+# ── 停止开发服务 ─────────────────────────────────────────
+_dev_stop_service() {
+    local label="$1" pid_file="$2"
+    local pid
+    pid=$(_read_pid "$pid_file")
+
+    if _pid_alive "$pid"; then
+        _info "停止 ${label} (pid=${pid})…"
+        kill "$pid" 2>/dev/null || true
+        # 等 3 秒，若未退出则强制 kill
+        local waited=0
+        while _pid_alive "$pid" && [ $waited -lt 30 ]; do
+            sleep 0.1; waited=$((waited + 1))
+        done
+        if _pid_alive "$pid"; then
+            _warn "${label} 未响应，强制终止…"
+            kill -9 "$pid" 2>/dev/null || true
+        fi
+        _ok "${label} 已停止"
+    else
+        _info "${label} 未在运行"
+    fi
+    rm -f "$pid_file"
+}
+
+# ── 查看开发服务状态 ─────────────────────────────────────
+_dev_status() {
+    echo ""
+    _sep
+    echo -e "${CYAN}  PlotPilot 开发环境状态${NC}"
+    _sep
+
+    echo ""
+    echo -e "${BLUE}本地直启服务:${NC}"
+
+    local backend_pid frontend_pid
+    backend_pid=$(_read_pid "$DEV_BACKEND_PID_FILE")
+    frontend_pid=$(_read_pid "$DEV_FRONTEND_PID_FILE")
+
+    if _pid_alive "$backend_pid"; then
+        echo -e "  backend   → http://127.0.0.1:${BACKEND_PORT}  ${GREEN}✓ 运行中${NC} (pid=${backend_pid})"
+    else
+        echo -e "  backend   → http://127.0.0.1:${BACKEND_PORT}  ${RED}✗ 未运行${NC}"
+    fi
+
+    if _pid_alive "$frontend_pid"; then
+        echo -e "  frontend  → http://127.0.0.1:${FRONTEND_PORT}  ${GREEN}✓ 运行中${NC} (pid=${frontend_pid})"
+    else
+        echo -e "  frontend  → http://127.0.0.1:${FRONTEND_PORT}  ${RED}✗ 未运行${NC}"
+    fi
+
+    # HTTP 探活
+    echo ""
+    echo -e "${BLUE}HTTP 探活:${NC}"
+
+    if _http_health "http://127.0.0.1:${BACKEND_PORT}/health" 2>/dev/null; then
+        echo -e "  backend   → http://127.0.0.1:${BACKEND_PORT}  ${GREEN}✓ 正常${NC}"
+    else
+        echo -e "  backend   → http://127.0.0.1:${BACKEND_PORT}  ${RED}✗ 不可达${NC}"
+    fi
+
+    if _http_health "http://127.0.0.1:${FRONTEND_PORT}" 2>/dev/null; then
+        echo -e "  frontend  → http://127.0.0.1:${FRONTEND_PORT}  ${GREEN}✓ 正常${NC}"
+    else
+        echo -e "  frontend  → http://127.0.0.1:${FRONTEND_PORT}  ${RED}✗ 不可达${NC}"
+    fi
+
+    echo ""
+}
+
+# ── 查看开发服务日志 ─────────────────────────────────────
+_dev_logs() {
+    local target="${1:-all}"
+
+    if [ "$target" = "backend" ]; then
+        if [ -f "$DEV_BACKEND_LOG" ]; then
+            _info "跟踪后端日志 (Ctrl+C 退出)…"
+            tail -f "$DEV_BACKEND_LOG"
+        else
+            _warn "后端日志不存在: ${DEV_BACKEND_LOG}"
+        fi
+    elif [ "$target" = "frontend" ]; then
+        if [ -f "$DEV_FRONTEND_LOG" ]; then
+            _info "跟踪前端日志 (Ctrl+C 退出)…"
+            tail -f "$DEV_FRONTEND_LOG"
+        else
+            _warn "前端日志不存在: ${DEV_FRONTEND_LOG}"
+        fi
+    else
+        _info "跟踪全部开发日志 (Ctrl+C 退出)…"
+        tail -f "$DEV_BACKEND_LOG" "$DEV_FRONTEND_LOG" 2>/dev/null || {
+            _warn "暂无日志文件"
+        }
+    fi
+}
+
+# ── dev 命令主入口 ────────────────────────────────────────
+cmd_dev() {
+    local sub="${1:-status}"
+    shift || true
+
+    # 解析通用标志
+    local follow_log=false
+    local filtered_args=()
+    for arg in "$@"; do
+        if [ "$arg" = "-log" ] || [ "$arg" = "--log" ]; then
+            follow_log=true
+        else
+            filtered_args+=("$arg")
+        fi
+    done
+    set -- "${filtered_args[@]}"
+
+    case "$sub" in
+        start)
+            _validate_services "$@"
+            local targets=("${@}")
+            _init_dev_dirs
+
+            if [ ${#targets[@]} -eq 0 ]; then
+                if ! _check_dev_deps "all"; then exit 1; fi
+                _dev_start_backend
+                _dev_start_frontend
+            else
+                for t in "${targets[@]}"; do
+                    if ! _check_dev_deps "$t"; then exit 1; fi
+                    if [ "$t" = "backend" ]; then
+                        _dev_start_backend
+                    elif [ "$t" = "frontend" ]; then
+                        _dev_start_frontend
+                    fi
+                done
+            fi
+
+            # 等一等再探活
+            echo ""
+            _info "等待服务就绪…"
+            sleep 2
+            if $follow_log; then
+                _dev_logs "${1:-all}"
+            else
+                _dev_status
+            fi
+            ;;
+        stop)
+            _init_dev_dirs
+            local stop_targets=("${@}")
+            if [ ${#stop_targets[@]} -eq 0 ]; then
+                _dev_stop_service "backend" "$DEV_BACKEND_PID_FILE"
+                _dev_stop_service "frontend" "$DEV_FRONTEND_PID_FILE"
+                _ok "开发环境已全部停止"
+            else
+                for t in "${stop_targets[@]}"; do
+                    if [ "$t" = "backend" ]; then
+                        _dev_stop_service "backend" "$DEV_BACKEND_PID_FILE"
+                    elif [ "$t" = "frontend" ]; then
+                        _dev_stop_service "frontend" "$DEV_FRONTEND_PID_FILE"
+                    fi
+                done
+            fi
+            ;;
+        restart)
+            _validate_services "$@"
+            _init_dev_dirs
+            local restart_targets=("${@}")
+
+            if [ ${#restart_targets[@]} -eq 0 ]; then
+                _info "重启全部开发服务…"
+                _dev_stop_service "backend" "$DEV_BACKEND_PID_FILE"
+                _dev_stop_service "frontend" "$DEV_FRONTEND_PID_FILE"
+                _check_dev_deps "all" || exit 1
+                _dev_start_backend
+                _dev_start_frontend
+            else
+                for t in "${restart_targets[@]}"; do
+                    _info "重启 ${t} 开发服务…"
+                    if [ "$t" = "backend" ]; then
+                        _dev_stop_service "backend" "$DEV_BACKEND_PID_FILE"
+                        _check_dev_deps "backend" || exit 1
+                        _dev_start_backend
+                    elif [ "$t" = "frontend" ]; then
+                        _dev_stop_service "frontend" "$DEV_FRONTEND_PID_FILE"
+                        _check_dev_deps "frontend" || exit 1
+                        _dev_start_frontend
+                    fi
+                done
+            fi
+
+            echo ""
+            _info "等待服务就绪…"
+            sleep 2
+            if $follow_log; then
+                _dev_logs "${1:-all}"
+            else
+                _dev_status
+            fi
+            ;;
+        status|ps)
+            _dev_status
+            ;;
+        logs|log)
+            _validate_services "$@"
+            _dev_logs "${1:-all}"
+            ;;
+        *)
+            _err "未知 dev 子命令: $sub"
+            echo "  可用: dev start [-log] [backend|frontend] | dev restart [backend|frontend] | dev stop [backend|frontend] | dev status | dev logs [backend|frontend]"
+            exit 1
+            ;;
+    esac
+}
+
+
+# ============================================================
 #  主入口
 # ============================================================
 
@@ -326,6 +663,9 @@ main() {
         build)
             _validate_services "$@"
             cmd_build "$@"
+            ;;
+        dev)
+            cmd_dev "$@"
             ;;
         help|--help|-h)
             _usage

@@ -72,6 +72,44 @@ def _extract_text_from_content_block(block: Any) -> str:
     return ""
 
 
+def _build_anthropic_messages(messages: list) -> list[dict]:
+    """将领域 Message 对象转换为 Anthropic Messages API 格式
+
+    处理三种消息类型：
+    - 普通消息（system/user/assistant）：按 role + content 透传
+    - assistant 含 tool_calls：转为 tool_use content block
+    - tool 角色：转为 user role 的 tool_result content block
+    """
+    result = []
+    for m in messages:
+        if m.role == "tool":
+            # Anthropic API: tool 结果必须以 user 角色发送
+            result.append({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": m.tool_call_id or "",
+                    "content": m.content,
+                }],
+            })
+        elif m.role == "assistant" and m.tool_calls:
+            # 含工具调用的 assistant 消息
+            content_blocks = []
+            if m.content:
+                content_blocks.append({"type": "text", "text": m.content})
+            for tc in m.tool_calls:
+                content_blocks.append({
+                    "type": "tool_use",
+                    "id": tc.id,
+                    "name": tc.name,
+                    "input": tc.arguments,
+                })
+            result.append({"role": "assistant", "content": content_blocks})
+        else:
+            result.append({"role": m.role, "content": m.content})
+    return result
+
+
 class AnthropicProvider(BaseProvider):
     """Anthropic LLM 提供商实现
 
@@ -156,10 +194,7 @@ class AnthropicProvider(BaseProvider):
             )
             # 构建 messages — 优先使用多轮 messages 数组
             if prompt.messages:
-                messages = [
-                    {"role": m.role, "content": m.content}
-                    for m in prompt.messages
-                ]
+                messages = _build_anthropic_messages(prompt.messages)
             else:
                 messages = [{"role": "user", "content": prompt.user}]
 
@@ -257,10 +292,7 @@ class AnthropicProvider(BaseProvider):
         )
         # 构建 messages — 优先多轮 messages 数组
         if prompt.messages:
-            messages = [
-                {"role": m.role, "content": m.content}
-                for m in prompt.messages
-            ]
+            messages = _build_anthropic_messages(prompt.messages)
         else:
             messages = [{"role": "user", "content": prompt.user}]
 
