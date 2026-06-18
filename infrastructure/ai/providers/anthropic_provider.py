@@ -7,7 +7,7 @@ import httpx
 from anthropic import Anthropic, AsyncAnthropic
 
 from domain.ai.services.llm_service import GenerationConfig, GenerationResult
-from domain.ai.value_objects.prompt import Prompt
+from domain.ai.value_objects.prompt import Prompt, ToolCall
 from domain.ai.value_objects.token_usage import TokenUsage
 from infrastructure.ai.config.settings import Settings
 from infrastructure.ai.http_timeout import build_httpx_timeout
@@ -134,17 +134,19 @@ class AnthropicProvider(BaseProvider):
         prompt: Prompt,
         config: GenerationConfig
     ) -> GenerationResult:
-        """生成文本
+        """生成文本（支持多轮 messages 和 tool calling）
+
+        向后兼容：prompt.messages 为 None 时走旧路径（system + user）。
 
         Args:
-            prompt: 提示词
+            prompt: 提示词（含可选的 messages 多轮数组和 tools 工具定义）
             config: 生成配置
 
         Returns:
-            生成结果
+            生成结果（含可选的 tool_calls）
 
         Raises:
-            RuntimeError: 当 API 调用失败或返回空内容时
+            RuntimeError: 当 API 调用失败或返回空内容且无 tool_calls 时
         """
         try:
             model_id = require_resolved_model_id(
@@ -152,14 +154,35 @@ class AnthropicProvider(BaseProvider):
                 self.settings.default_model,
                 provider_label="Anthropic / Claude",
             )
+            # 构建 messages — 优先使用多轮 messages 数组
+            if prompt.messages:
+                messages = [
+                    {"role": m.role, "content": m.content}
+                    for m in prompt.messages
+                ]
+            else:
+                messages = [{"role": "user", "content": prompt.user}]
+
             # 构建请求参数
             create_kwargs = {
                 "model": model_id,
                 "temperature": config.temperature,
                 "max_tokens": config.max_tokens,
                 "system": prompt.system,
-                "messages": [{"role": "user", "content": prompt.user}],
+                "messages": messages,
             }
+
+            # 透传 tools 参数
+            if prompt.tools:
+                create_kwargs["tools"] = [
+                    {
+                        "name": t.name,
+                        "description": t.description,
+                        "input_schema": t.parameters,
+                    }
+                    for t in prompt.tools
+                ]
+
             # Anthropic Messages API does not accept OpenAI-style response_format.
             # Keep structured output provider-agnostic by moving the constraint into
             # the prompt; structured_json_pipeline will parse and validate it.
@@ -176,15 +199,26 @@ class AnthropicProvider(BaseProvider):
             if not response.content:
                 raise RuntimeError("API returned empty content")
 
+            # 解析 content blocks — 区分 text 和 tool_use
             parts = []
+            tool_calls = []
             for block in response.content:
-                text = _extract_text_from_content_block(block)
-                if text:
-                    parts.append(text)
+                if getattr(block, "type", None) == "tool_use":
+                    tool_calls.append(ToolCall(
+                        id=getattr(block, "id", ""),
+                        name=getattr(block, "name", ""),
+                        arguments=getattr(block, "input", {}),
+                    ))
+                else:
+                    text = _extract_text_from_content_block(block)
+                    if text:
+                        parts.append(text)
 
             content = "\n".join(part.strip() for part in parts if part and part.strip()).strip()
-            if not content:
-                raise RuntimeError("API returned no text content")
+
+            # 既无文本也无 tool_calls 时才报错
+            if not content and not tool_calls:
+                raise RuntimeError("API returned no text content and no tool calls")
 
             # 创建 token 使用统计
             token_usage = TokenUsage(
@@ -192,7 +226,12 @@ class AnthropicProvider(BaseProvider):
                 output_tokens=response.usage.output_tokens
             )
 
-            return GenerationResult(content=content, token_usage=token_usage)
+            return GenerationResult(
+                content=content,
+                token_usage=token_usage,
+                tool_calls=tool_calls,
+                finish_reason="tool_calls" if tool_calls else "stop",
+            )
 
         except RuntimeError:
             raise
