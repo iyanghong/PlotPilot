@@ -4,8 +4,8 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from fastapi import APIRouter, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Request, Query
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from application.assist.assist_service import AssistService
@@ -116,3 +116,11 @@ async def inspire(request: Request, body: InspireRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/assist/sessions", tags=["灵感助手"])
+async def list_sessions(novel_id: str = Query(..., description="书目 ID")):
+    """获取某书目的全部灵感会话列表"""
+    service = _get_service()
+    sessions = await service.list_sessions(novel_id)
+    return JSONResponse(content={"sessions": sessions})

@@ -40,3 +40,13 @@ class InspireRepository(ABC):
     async def get_latest_session(self, novel_id: str) -> Optional[InspireSession]:
         """获取某书目最近一次活跃会话"""
         ...
+
+    @abstractmethod
+    async def list_sessions_by_novel(self, novel_id: str) -> List[InspireSession]:
+        """获取某书目的全部会话（按创建时间倒序）"""
+        ...
+
+    @abstractmethod
+    async def save_field_data(self, session_id: str, field_data: dict) -> None:
+        """保存字段提取结果到会话"""
+        ...

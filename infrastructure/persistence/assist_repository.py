@@ -33,10 +33,16 @@ class SqliteAssistRepository(InspireRepository):
             "  novel_id TEXT NOT NULL,"
             "  strategy TEXT NOT NULL,"
             "  status TEXT NOT NULL DEFAULT 'active',"
+            "  field_data TEXT DEFAULT '{}',"
             "  created_at TEXT NOT NULL,"
             "  updated_at TEXT NOT NULL"
             ")"
         )
+        # 为已有表补加 field_data 列（无 ALTER COLUMN IF NOT EXISTS，忽略失败）
+        try:
+            self._db.execute("ALTER TABLE assist_sessions ADD COLUMN field_data TEXT DEFAULT '{}'")
+        except Exception:
+            pass
         self._db.execute(
             "CREATE INDEX IF NOT EXISTS idx_assist_sessions_novel "
             "ON assist_sessions(novel_id)"
@@ -71,11 +77,20 @@ class SqliteAssistRepository(InspireRepository):
         except ValueError:
             logger.warning("assist_sessions %s 状态值无效: %s，回退为 active", row["id"], row.get("status"))
             status = SessionStatus.ACTIVE
+        # 解析 field_data JSON
+        field_data = {}
+        raw_fd = row.get("field_data", "{}")
+        if raw_fd and raw_fd != "{}":
+            try:
+                field_data = json.loads(raw_fd)
+            except json.JSONDecodeError:
+                pass
         session = InspireSession(
             id=row["id"],
             novel_id=row["novel_id"],
             strategy=strategy,
             status=status,
+            field_data=field_data,
         )
         session.created_at = datetime.fromisoformat(row["created_at"])
         session.updated_at = datetime.fromisoformat(row["updated_at"])
@@ -108,13 +123,14 @@ class SqliteAssistRepository(InspireRepository):
 
     async def create_session(self, session: InspireSession) -> InspireSession:
         self._db.execute(
-            "INSERT INTO assist_sessions (id, novel_id, strategy, status, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO assist_sessions (id, novel_id, strategy, status, field_data, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 session.id,
                 session.novel_id,
                 session.strategy.value,
                 session.status.value,
+                json.dumps(session.field_data or {}, ensure_ascii=False),
                 session.created_at.isoformat(),
                 session.updated_at.isoformat(),
             ),
@@ -133,8 +149,13 @@ class SqliteAssistRepository(InspireRepository):
     async def update_session(self, session: InspireSession) -> InspireSession:
         session.updated_at = datetime.now(timezone.utc)
         self._db.execute(
-            "UPDATE assist_sessions SET status = ?, updated_at = ? WHERE id = ?",
-            (session.status.value, session.updated_at.isoformat(), session.id),
+            "UPDATE assist_sessions SET status = ?, field_data = ?, updated_at = ? WHERE id = ?",
+            (
+                session.status.value,
+                json.dumps(session.field_data or {}, ensure_ascii=False),
+                session.updated_at.isoformat(),
+                session.id,
+            ),
         )
         self._db.commit()
         return session
@@ -168,3 +189,21 @@ class SqliteAssistRepository(InspireRepository):
         if row is None:
             return None
         return self._row_to_session(row)
+
+    async def list_sessions_by_novel(self, novel_id: str) -> list[InspireSession]:
+        """获取某书目的全部会话（按创建时间倒序）"""
+        rows = self._db.fetch_all(
+            "SELECT * FROM assist_sessions WHERE novel_id = ? "
+            "ORDER BY created_at DESC",
+            (novel_id,),
+        )
+        return [self._row_to_session(r) for r in rows]
+
+    async def save_field_data(self, session_id: str, field_data: dict) -> None:
+        """保存字段提取结果到会话"""
+        now = datetime.now(timezone.utc).isoformat()
+        self._db.execute(
+            "UPDATE assist_sessions SET field_data = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(field_data, ensure_ascii=False), now, session_id),
+        )
+        self._db.commit()

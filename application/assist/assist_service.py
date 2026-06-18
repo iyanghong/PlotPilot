@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import uuid
 from functools import lru_cache
@@ -14,9 +13,6 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 import yaml
 
 logger = logging.getLogger(__name__)
-
-# 灵感助手对话调试开关 — 设置 DEBUG_INSPIRE=true 即可在 INFO 级别打印完整对话日志
-_DEBUG_INSPIRE = os.getenv("DEBUG_INSPIRE", "").lower() in ("1", "true", "yes", "on")
 
 from domain.ai.value_objects.prompt import Prompt, Message
 from domain.assist.entities import (
@@ -241,11 +237,14 @@ class AssistService:
         """
         from infrastructure.ai.tool_registry import get_tool_registry
 
-        if _DEBUG_INSPIRE:
-            logger.info("╔══ 灵感助手对话开始 ══ session=%s strategy=%s", session.id, session.strategy.value)
-            logger.info("║ 用户输入: %s", user_message)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("╔══ 灵感助手对话开始 ══ session=%s strategy=%s", session.id, session.strategy.value)
+            logger.debug("║ 用户输入: %s", user_message)
 
-        # 1. 保存用户消息
+        # 1. 先获取历史消息（在保存当前消息之前，避免 PersistenceQueue 异步写入导致查不到）
+        history = await self._repo.get_messages(session.id)
+
+        # 2. 保存用户消息（异步入队，不阻塞）
         user_msg = InspireMessage(
             id=f"msg_{uuid.uuid4().hex[:12]}",
             session_id=session.id,
@@ -254,8 +253,7 @@ class AssistService:
         )
         await self._repo.add_message(user_msg)
 
-        # 2. 构建多轮消息数组
-        history = await self._repo.get_messages(session.id)
+        # 3. 构建多轮消息数组（历史消息 + 当前用户消息）
         strategy = _get_strategy(session.strategy.value)
         tool_registry = get_tool_registry()
         tool_defs = tool_registry.get_definitions()
@@ -263,32 +261,33 @@ class AssistService:
         messages = [Message(role="system", content=strategy.build_agent_system_prompt())]
         for m in history:
             messages.append(Message(role=m.role, content=m.content))
+        messages.append(Message(role="user", content=user_message))
 
-        if _DEBUG_INSPIRE:
-            logger.info("╔══ 发送给 LLM 的上下文（共 %d 条消息，%d 个工具定义）══", len(messages), len(tool_defs))
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("╔══ 发送给 LLM 的上下文（共 %d 条消息，%d 个工具定义）══", len(messages), len(tool_defs))
             for i, msg in enumerate(messages):
                 # 截断过长的内容以便阅读
                 content_preview = msg.content if len(msg.content) <= 500 else msg.content[:500] + "...(截断)"
-                logger.info("║ [%d] role=%s content=%s", i, msg.role, content_preview)
+                logger.debug("║ [%d] role=%s content=%s", i, msg.role, content_preview)
             if tool_defs:
-                logger.info("║ 工具定义: %s", [td.name for td in tool_defs])
-            logger.info("╚══ 上下文结束 ══")
+                logger.debug("║ 工具定义: %s", [td.name for td in tool_defs])
+            logger.debug("╚══ 上下文结束 ══")
 
         # 3. Agent 循环（最多 5 轮，最多 3 次工具调用）
         full_content = ""
         tool_call_count = 0
 
         for loop_idx in range(5):
-            if _DEBUG_INSPIRE:
-                logger.info("── Agent 循环第 %d 轮 ──", loop_idx + 1)
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("── Agent 循环第 %d 轮 ──", loop_idx + 1)
 
             result = await self._llm.generate_with_tools(messages, tool_defs)
 
-            if _DEBUG_INSPIRE:
-                logger.info("LLM finish_reason=%s, tool_calls=%d, content_len=%d",
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("LLM finish_reason=%s, tool_calls=%d, content_len=%d",
                             result.finish_reason, len(result.tool_calls or []), len(result.content or ""))
                 if result.content and not result.tool_calls:
-                    logger.info("⚠️  第1次调用(非流式)返回文本: %.300s...", result.content)
+                    logger.debug("⚠️  第1次调用(非流式)返回文本: %.300s...", result.content)
 
             # 分支 A：LLM 要调工具
             if result.tool_calls:
@@ -297,16 +296,16 @@ class AssistService:
                     if tool_call_count > 3:
                         break
 
-                    if _DEBUG_INSPIRE:
-                        logger.info("🔧 工具调用: name=%s args=%s", tc.name, tc.arguments)
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug("🔧 工具调用: name=%s args=%s", tc.name, tc.arguments)
 
                     yield {"type": "tool_call", "name": tc.name, "args": tc.arguments}
 
                     tool_result = await tool_registry.execute(tc.name, tc.arguments)
                     summary = tool_result[:200]
 
-                    if _DEBUG_INSPIRE:
-                        logger.info("📋 工具结果: name=%s summary=%s", tc.name, summary)
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug("📋 工具结果: name=%s summary=%s", tc.name, summary)
 
                     yield {"type": "tool_result", "name": tc.name, "summary": summary}
 
@@ -331,8 +330,8 @@ class AssistService:
             if full_content:
                 yield {"type": "chat_chunk", "content": full_content}
 
-            if _DEBUG_INSPIRE:
-                logger.info("💬 最终回复: %s", full_content)
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("💬 最终回复: %s", full_content)
 
             break
 
@@ -350,8 +349,8 @@ class AssistService:
         is_question = full_content.strip().endswith("？") or full_content.strip().endswith("?")
         message_type = "question" if is_question else "suggestion"
 
-        if _DEBUG_INSPIRE:
-            logger.info("╚══ 对话结束 ══ message_type=%s", message_type)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("╚══ 对话结束 ══ message_type=%s", message_type)
 
         yield {"type": "chat_done", "message_type": message_type}
 
@@ -432,11 +431,29 @@ class AssistService:
                 special_requirements=data.get("specialRequirements", ""),
             )
 
-        # 将会话标记为完成
+        # 保存字段数据并标记会话为完成
+        session.set_field_data(fields.to_dict())
         session.complete()
         await self._repo.update_session(session)
 
         return fields
+
+    # ---- sessions ----
+
+    async def list_sessions(self, novel_id: str) -> list[dict]:
+        """获取某书目的全部会话列表（供前端历史选择）"""
+        sessions = await self._repo.list_sessions_by_novel(novel_id)
+        return [
+            {
+                "session_id": s.id,
+                "strategy": s.strategy.value,
+                "status": s.status.value,
+                "field_data": s.field_data or {},
+                "created_at": s.created_at.isoformat(),
+                "updated_at": s.updated_at.isoformat(),
+            }
+            for s in sessions
+        ]
 
     # ---- resume ----
 

@@ -6,6 +6,15 @@ export interface AssistSessionInfo {
   strategy: string
 }
 
+export interface AssistSessionListItem {
+  session_id: string
+  strategy: string
+  status: string
+  field_data: AssistFieldData | null
+  created_at: string
+  updated_at: string
+}
+
 export interface AssistMessage {
   id: string
   role: 'user' | 'assistant'
@@ -173,4 +182,21 @@ export function subscribeAssist(
   })()
 
   return ctrl
+}
+
+/**
+ * 获取某书目的灵感会话列表（REST 接口）
+ */
+export async function fetchSessions(
+  novelId: string,
+): Promise<AssistSessionListItem[]> {
+  const url = resolveHttpUrl(`/api/v1/assist/sessions?novel_id=${encodeURIComponent(novelId)}`)
+  const headers: Record<string, string> = { 'Accept': 'application/json' }
+  const token = localStorage.getItem('plotpilot_token')
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
+  const res = await fetch(url, { headers })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const data = await res.json()
+  return data.sessions || []
 }

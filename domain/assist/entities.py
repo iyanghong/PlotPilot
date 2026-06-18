@@ -33,15 +33,22 @@ class InspireSession(BaseEntity):
         novel_id: str,
         strategy: InspirationStrategy,
         status: SessionStatus = SessionStatus.ACTIVE,
+        field_data: Optional[dict] = None,
     ):
         super().__init__(id)
         self.novel_id = novel_id
         self.strategy = strategy
         self.status = status
+        self.field_data = field_data or {}  # 保存的字段提取结果
 
     def complete(self) -> None:
         """标记会话完成"""
         self.status = SessionStatus.COMPLETED
+        self.updated_at = datetime.now(timezone.utc)
+
+    def set_field_data(self, data: dict) -> None:
+        """保存字段提取结果"""
+        self.field_data = data
         self.updated_at = datetime.now(timezone.utc)
 
 
