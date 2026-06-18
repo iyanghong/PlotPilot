@@ -26,6 +26,14 @@
     <div class="assist-body">
       <!-- 对话区 -->
       <div class="assist-chat" ref="chatContainerRef">
+        <!-- 工具调用状态条 -->
+        <Transition name="slide-fade">
+          <div v-if="toolStatus.show" class="tool-status-bar" :class="`tool-status-${toolStatus.type}`">
+            <span class="tool-status-icon">{{ toolStatus.type === 'info' ? '🔍' : '✅' }}</span>
+            <span class="tool-status-text">{{ toolStatus.text }}</span>
+          </div>
+        </Transition>
+
         <div
           v-for="msg in messages"
           :key="msg.id"
@@ -33,9 +41,12 @@
           :class="`chat-${msg.role}`"
         >
           <div class="chat-avatar">
-            {{ msg.role === 'user' ? '😀' : '🤖' }}
+            {{ msg.role === 'user' ? '😀' : (msg as LocalMessage).messageType === 'question' ? '🤔' : '💡' }}
           </div>
-          <div class="chat-bubble">
+          <div
+            class="chat-bubble"
+            :class="msg.role === 'assistant' && (msg as LocalMessage).messageType === 'question' ? 'bubble-question' : 'bubble-suggestion'"
+          >
             {{ msg.content }}
           </div>
         </div>
@@ -152,9 +163,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { NModal, NSelect, NInput, NButton, NIcon, useMessage } from 'naive-ui'
 import { subscribeAssist, type AssistFieldData, type AssistMessage } from '@/api/assist'
+
+/** 扩展本地消息类型，追加 messageType 字段用于区分追问/建议气泡 */
+interface LocalMessage extends AssistMessage {
+  messageType?: 'question' | 'suggestion'
+}
 
 const emit = defineEmits<{
   (e: 'fill-fields', fields: AssistFieldData): void
@@ -177,13 +193,41 @@ const visible = computed({
 const currentStrategy = ref('brainstorm')
 const isSessionActive = ref(false)
 const sessionId = ref<string | null>(null)
-const messages = ref<AssistMessage[]>([])
+const messages = ref<LocalMessage[]>([])
 const inputMessage = ref('')
 const sending = ref(false)
 const streamingContent = ref('')
 const fieldData = ref<AssistFieldData>({} as AssistFieldData)
 const autoExtracting = ref(false)
 const chatContainerRef = ref<HTMLElement | null>(null)
+
+// 工具调用状态条
+const toolStatus = reactive({
+  show: false,
+  text: '',
+  type: 'info' as 'info' | 'success',
+})
+
+let toolTimer: ReturnType<typeof setTimeout> | null = null
+
+/** 显示工具调用状态 — 查找中 */
+function showToolCall(_name: string, args: Record<string, unknown>) {
+  if (toolTimer) clearTimeout(toolTimer)
+  const keyword = (args.genre_keyword as string) || ''
+  toolStatus.show = true
+  toolStatus.text = keyword ? `正在查找「${keyword}」类型写作模板…` : `正在查找灵感素材…`
+  toolStatus.type = 'info'
+}
+
+/** 显示工具结果状态 — 完成后 1.5s 自动收起 */
+function showToolResult(_name: string, _summary: string) {
+  if (toolTimer) clearTimeout(toolTimer)
+  toolStatus.text = `已参考类型模板`
+  toolStatus.type = 'success'
+  toolTimer = setTimeout(() => {
+    toolStatus.show = false
+  }, 1500)
+}
 
 const strategyOptions = [
   { label: '脑洞爆破', value: 'brainstorm' },
@@ -249,13 +293,14 @@ async function handleSend() {
         streamingContent.value += content
         scrollToBottom()
       },
-      onChatDone() {
-        // 将流式内容转为正式消息
+      onChatDone(messageType) {
+        // 将流式内容转为正式消息，携带 messageType 用于气泡区分
         if (streamingContent.value) {
           messages.value.push({
             id: `ai_${Date.now()}`,
             role: 'assistant',
             content: streamingContent.value,
+            messageType: messageType || 'suggestion',
             created_at: new Date().toISOString(),
           })
         }
@@ -263,6 +308,12 @@ async function handleSend() {
         sending.value = false
         // 每次 AI 回复后自动提取字段
         autoGenerateFields()
+      },
+      onToolCall(name, args) {
+        showToolCall(name, args)
+      },
+      onToolResult(name, summary) {
+        showToolResult(name, summary)
       },
       onError(err) {
         message.error(err)
@@ -478,5 +529,51 @@ function handleClose(_show: boolean) {
     grid-template-columns: 1fr 1fr;
     gap: 8px;
   }
+}
+
+/* 追问气泡 — 琥珀/浅黄底，左侧高亮边框 */
+.bubble-question {
+  background: rgba(245, 158, 11, 0.08) !important;
+  border-left: 3px solid #f59e0b;
+}
+
+/* 建议气泡 — 继承默认灰底样式 */
+.bubble-suggestion {
+  /* 继承 chat-bubble 默认样式 */
+}
+
+/* 工具调用状态条 */
+.tool-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.tool-status-info {
+  background: rgba(59, 130, 246, 0.08);
+  color: var(--app-text-secondary);
+}
+.tool-status-success {
+  background: rgba(34, 197, 94, 0.08);
+  color: var(--app-text-secondary);
+}
+.tool-status-icon {
+  flex-shrink: 0;
+}
+
+/* 滑入/滑出动画 */
+.slide-fade-enter-active {
+  transition: all 0.3s ease;
+}
+.slide-fade-leave-active {
+  transition: all 0.3s ease;
+}
+.slide-fade-enter-from,
+.slide-fade-leave-to {
+  transform: translateY(-10px);
+  opacity: 0;
 }
 </style>
