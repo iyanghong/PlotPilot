@@ -1,6 +1,6 @@
 services:
   backend:
-    image: plotpilot-backend:dev
+    image: novel-backend:dev
     build:
       context: .
       args:
@@ -33,7 +33,7 @@ services:
     user: "${PLOTPILOT_UID:-1000}:${PLOTPILOT_GID:-1000}"
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      LOG_FILE: ${LOG_FILE:-logs/plotpilot.log}
+      LOG_FILE: ${LOG_FILE:-logs/novel.log}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:${PLOTPILOT_FRONTEND_PORT:-3000},http://127.0.0.1:${PLOTPILOT_FRONTEND_PORT:-3000}}
       EMBEDDING_SERVICE: ${EMBEDDING_SERVICE:-openai}
       VECTOR_STORE_TYPE: ${VECTOR_STORE_TYPE:-chromadb}
