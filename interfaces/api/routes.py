@@ -49,6 +49,7 @@ def register_api_routes(app: FastAPI) -> None:
     from interfaces.api.v1.admin import dashboard_routes as admin_dashboard
     from interfaces.api.v1.admin import user_routes as admin_users
     from interfaces.api.v1.admin import book_routes as admin_books
+    from interfaces.api.v1.admin import version_routes as admin_version
     from interfaces.api.v1.assist import inspire_routes as assist_routes
     from interfaces.api.v1 import auth as auth_routes
     from interfaces.api.v1 import reader as reader_module
@@ -158,6 +159,7 @@ def register_api_routes(app: FastAPI) -> None:
             RouterRegistration(admin_dashboard.router, API_V1_PREFIX),
             RouterRegistration(admin_users.router, API_V1_PREFIX),
             RouterRegistration(admin_books.router, API_V1_PREFIX),
+            RouterRegistration(admin_version.router, API_V1_PREFIX),
         ),
     )
 

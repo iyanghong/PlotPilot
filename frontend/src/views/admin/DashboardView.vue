@@ -11,6 +11,7 @@ import QualityPanel from './components/QualityPanel.vue'
 import CharacterForeshadowPanel from './components/CharacterForeshadowPanel.vue'
 import TokenRankingPanel from './components/TokenRankingPanel.vue'
 import SystemPanel from './components/SystemPanel.vue'
+import VersionPanel from './components/VersionPanel.vue'
 
 const authStore = useAuthStore()
 const message = useMessage()
@@ -42,6 +43,7 @@ onMounted(async () => {
         <CharacterForeshadowPanel :data="dashboardData.cast_foreshadow" />
         <TokenRankingPanel :data="dashboardData.token_ranking" />
         <SystemPanel :data="dashboardData.system" />
+        <VersionPanel />
       </div>
     </n-spin>
   </div>

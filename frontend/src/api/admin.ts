@@ -129,4 +129,36 @@ export const adminApi = {
     const res = await apiClient.patch<{ success: boolean }>(`/admin/books/${novelId}/owner`, { user_id: userId })
     return res
   },
+
+  /** 版本检测相关 */
+
+  /** 获取版本状态 */
+  async getVersionStatus(): Promise<VersionStatus> {
+    return apiClient.get<VersionStatus>('/admin/version')
+  },
+
+  /** 触发版本更新 */
+  async triggerUpdate(): Promise<UpdateResult> {
+    return apiClient.post<UpdateResult>('/admin/version/update')
+  },
+}
+
+/** 版本状态 */
+export interface VersionStatus {
+  current_version: string
+  build_id: string
+  git_commit: string
+  git_branch: string
+  commits_behind: number
+  has_local_changes: boolean
+  update_available: boolean
+  last_checked_at: string
+}
+
+/** 更新结果 */
+export interface UpdateResult {
+  success: boolean
+  previous_commit: string
+  new_commit: string | null
+  message: string
 }
