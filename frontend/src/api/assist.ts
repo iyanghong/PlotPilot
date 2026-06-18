@@ -35,9 +35,13 @@ export interface AssistFieldData {
 export interface AssistChatHandlers {
   onSessionCreated?: (info: AssistSessionInfo) => void
   onChatChunk?: (content: string) => void
-  onChatDone?: (messageId: string) => void
+  onChatDone?: (messageType: 'question' | 'suggestion') => void
   onFieldsDone?: (fields: AssistFieldData) => void
   onResumeDone?: (data: AssistResumeData) => void
+  /** Agent 工具调用回调 — name 为工具名，args 为调用参数 */
+  onToolCall?: (name: string, args: Record<string, unknown>) => void
+  /** Agent 工具结果回调 — name 为工具名，summary 为结果摘要 */
+  onToolResult?: (name: string, summary: string) => void
   onConnected?: () => void
   onDisconnected?: () => void
   onStreamEnd?: () => void
@@ -126,7 +130,13 @@ export function subscribeAssist(
                 handlers.onChatChunk?.(payload.content || '')
                 break
               case 'chat_done':
-                handlers.onChatDone?.(payload.message_id || '')
+                handlers.onChatDone?.(payload.message_type || 'suggestion')
+                break
+              case 'tool_call':
+                handlers.onToolCall?.(payload.name || '', payload.args || {})
+                break
+              case 'tool_result':
+                handlers.onToolResult?.(payload.name || '', payload.summary || '')
                 break
               case 'fields_done':
                 handlers.onFieldsDone?.(payload as AssistFieldData)
