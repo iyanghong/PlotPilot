@@ -70,14 +70,23 @@ async def _event_gen(service: AssistService, req: InspireRequest, request: Reque
                 yield f"data: {json.dumps({'error': 'message 不能为空'})}\n\n"
                 return
 
-            # 流式对话
-            async for chunk in service.chat(session, req.message):
+            async for event in service.chat(session, req.message):
                 if await request.is_disconnected():
                     break
-                yield f"event: chat_chunk\ndata: {json.dumps({'content': chunk})}\n\n"
 
-            # 发送完成事件
-            yield f"event: chat_done\ndata: {json.dumps({'message_id': f'msg_{session.id}'})}\n\n"
+                event_type = event["type"]
+
+                if event_type == "chat_chunk":
+                    yield f"event: chat_chunk\ndata: {json.dumps({'content': event['content']})}\n\n"
+
+                elif event_type == "tool_call":
+                    yield f"event: tool_call\ndata: {json.dumps({'name': event['name'], 'args': event['args']}, ensure_ascii=False)}\n\n"
+
+                elif event_type == "tool_result":
+                    yield f"event: tool_result\ndata: {json.dumps({'name': event['name'], 'summary': event['summary']}, ensure_ascii=False)}\n\n"
+
+                elif event_type == "chat_done":
+                    yield f"event: chat_done\ndata: {json.dumps({'message_type': event['message_type']})}\n\n"
 
         elif req.action == "generate_fields":
             # 字段提取（非流式）
