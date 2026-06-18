@@ -1,8 +1,8 @@
 """LLM 客户端包装器"""
 from typing import AsyncIterator
 
-from domain.ai.services.llm_service import DEFAULT_MAX_OUTPUT_TOKENS, GenerationConfig
-from domain.ai.value_objects.prompt import Prompt
+from domain.ai.services.llm_service import DEFAULT_MAX_OUTPUT_TOKENS, GenerationConfig, GenerationResult
+from domain.ai.value_objects.prompt import Prompt, Message, ToolDefinition
 from infrastructure.ai.provider_factory import DynamicLLMService
 
 
@@ -70,3 +70,33 @@ class LLMClient:
         # 流式生成
         async for chunk in self.provider.stream_generate(prompt_obj, config):
             yield chunk
+
+    async def generate_with_tools(
+        self,
+        messages: list[Message],
+        tools: list[ToolDefinition] = None,
+        **kwargs,
+    ) -> GenerationResult:
+        """使用工具调用生成 — Agent 循环的核心入口
+
+        Args:
+            messages: 完整的多轮消息数组（第一应为 system 消息）
+            tools: 可用工具定义列表
+            **kwargs: model, max_tokens, temperature
+
+        Returns:
+            GenerationResult（content 为空且 tool_calls 非空表示 LLM 要调用工具）
+        """
+        config = self._build_config(**kwargs)
+        # 从 messages 中提取 system 消息
+        system = ""
+        if messages and messages[0].role == "system":
+            system = messages[0].content
+
+        prompt = Prompt(
+            system=system,
+            user="",
+            messages=messages,
+            tools=tools or [],
+        )
+        return await self.provider.generate(prompt, config)
