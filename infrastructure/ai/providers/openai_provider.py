@@ -1,5 +1,6 @@
 """OpenAI LLM 提供商实现"""
 import asyncio
+import json
 import logging
 import openai
 import httpx
@@ -8,7 +9,7 @@ from typing import Any, AsyncIterator
 from openai import AsyncOpenAI
 
 from domain.ai.services.llm_service import GenerationConfig, GenerationResult
-from domain.ai.value_objects.prompt import Prompt
+from domain.ai.value_objects.prompt import Prompt, ToolCall
 from domain.ai.value_objects.token_usage import TokenUsage
 from application.ai.llm_retry_policy import LLM_MAX_TOTAL_ATTEMPTS, is_retryable_llm_error
 from infrastructure.ai.config.settings import Settings
@@ -99,6 +100,20 @@ class OpenAIProvider(BaseProvider):
 
         for attempt in range(LLM_MAX_TOTAL_ATTEMPTS):
             request_kwargs = self._build_chat_request_kwargs(messages, config)
+            # 透传 tools 参数
+            if prompt.tools:
+                request_kwargs["tools"] = [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": t.name,
+                            "description": t.description,
+                            "parameters": t.parameters,
+                        },
+                    }
+                    for t in prompt.tools
+                ]
+                request_kwargs["tool_choice"] = "auto"
             try:
                 try:
                     response = await self.async_client.chat.completions.create(**request_kwargs)
@@ -118,7 +133,21 @@ class OpenAIProvider(BaseProvider):
 
                 content = self._extract_text_from_response(response)
 
-                if not content:
+                # 提取 tool_calls（OpenAI 格式 → 领域 ToolCall 值对象）
+                tool_calls = []
+                message = response.choices[0].message
+                if hasattr(message, "tool_calls") and message.tool_calls:
+                    for tc in message.tool_calls:
+                        try:
+                            args = json.loads(tc.function.arguments)
+                        except json.JSONDecodeError:
+                            args = {}
+                        tool_calls.append(
+                            ToolCall(id=tc.id, name=tc.function.name, arguments=args)
+                        )
+
+                # 如果没有文字内容也没有工具调用，才回退到流式聚合
+                if not content and not tool_calls:
                     logger.warning(
                         "OpenAI-compatible response returned empty non-stream content; "
                         "falling back to streaming aggregation (attempt=%d/%d)",
@@ -126,13 +155,20 @@ class OpenAIProvider(BaseProvider):
                         LLM_MAX_TOTAL_ATTEMPTS,
                     )
                     content, token_usage = await self._generate_via_stream(request_kwargs)
-                    return GenerationResult(content=content, token_usage=token_usage)
+                    return GenerationResult(
+                        content=content,
+                        token_usage=token_usage,
+                        tool_calls=tool_calls,
+                        finish_reason="tool_calls" if tool_calls else "stop",
+                    )
 
                 input_tokens = response.usage.prompt_tokens if response.usage else 0
                 output_tokens = response.usage.completion_tokens if response.usage else 0
                 return GenerationResult(
                     content=content,
                     token_usage=TokenUsage(input_tokens=input_tokens, output_tokens=output_tokens),
+                    tool_calls=tool_calls,
+                    finish_reason="tool_calls" if tool_calls else "stop",
                 )
             except Exception as exc:
                 last_error = exc
@@ -196,10 +232,31 @@ class OpenAIProvider(BaseProvider):
             raise RuntimeError(f"Failed to stream text: {str(e)}") from e
 
     @staticmethod
-    def _build_messages(prompt: Prompt) -> list[dict[str, str]]:
+    def _build_messages(prompt: Prompt) -> list[dict]:
+        """构建 messages — 优先 Prompt.messages 数组，回退到 system + user"""
+        if prompt.messages:
+            msgs = []
+            for m in prompt.messages:
+                msg = {"role": m.role, "content": m.content}
+                if m.tool_call_id:
+                    msg["tool_call_id"] = m.tool_call_id
+                if m.tool_calls:
+                    msg["tool_calls"] = [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                            },
+                        }
+                        for tc in m.tool_calls
+                    ]
+                msgs.append(msg)
+            return msgs
         return [
             {"role": "system", "content": prompt.system},
-            {"role": "user", "content": prompt.user}
+            {"role": "user", "content": prompt.user},
         ]
 
     # 🔥 记录已知不支持 json_schema 的 base_url（避免每次重试）
@@ -207,7 +264,7 @@ class OpenAIProvider(BaseProvider):
 
     def _build_chat_request_kwargs(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict],
         config: GenerationConfig,
         *,
         stream: bool = False,
