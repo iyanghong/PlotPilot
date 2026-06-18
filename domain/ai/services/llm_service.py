@@ -32,16 +32,25 @@ class GenerationConfig:
 
 
 class GenerationResult:
-    """生成结果"""
-    def __init__(self, content: str, token_usage: TokenUsage):
-        self.content = content
+    """生成结果 — 支持文本回复和工具调用"""
+    def __init__(
+        self,
+        content: str,
+        token_usage: TokenUsage,
+        tool_calls: list = None,
+        finish_reason: str = "stop",
+    ):
+        self.content = content or ""
         self.token_usage = token_usage
+        self.tool_calls = tool_calls or []
+        self.finish_reason = finish_reason
         self.__post_init__()
 
     def __post_init__(self):
-        """验证结果参数"""
-        if not self.content or not self.content.strip():
-            raise ValueError("Content cannot be empty")
+        """验证结果参数 — tool_calls 与空 content 同时存在时跳过 content 检查"""
+        has_tool_calls = bool(self.tool_calls)
+        if not has_tool_calls and (not self.content or not self.content.strip()):
+            raise ValueError("Content cannot be empty when no tool calls present")
 
 
 class LLMService(ABC):
