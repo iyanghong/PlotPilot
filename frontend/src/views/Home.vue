@@ -845,7 +845,10 @@ function handleInspireFill(fields: AssistFieldData) {
   }
   if (fields.title) newBook.value.title = fields.title
   if (fields.premise) newBook.value.premise = fields.premise
-  if (fields.genre) newBook.value.genre = fields.genre
+  if (fields.genre) {
+    // 将 genre（大类）和 sub_genre（网文主题）合并为「大类/细分主题」格式
+    newBook.value.genre = fields.sub_genre ? `${fields.genre}/${fields.sub_genre}` : fields.genre
+  }
   if (fields.world_preset) newBook.value.worldPreset = fields.world_preset
   if (fields.story_structure) newBook.value.storyStructure = fields.story_structure
   if (fields.pacing_control) newBook.value.pacingControl = fields.pacing_control

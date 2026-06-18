@@ -135,6 +135,12 @@
               </span>
             </div>
             <div class="field-item">
+              <span class="field-label">网文主题</span>
+              <span class="field-value" :class="{ empty: !fieldData.sub_genre }">
+                {{ fieldData.sub_genre || '—' }}
+              </span>
+            </div>
+            <div class="field-item">
               <span class="field-label">世界观基调</span>
               <span class="field-value" :class="{ empty: !fieldData.world_preset }">
                 {{ fieldData.world_preset || '—' }}
@@ -276,7 +282,7 @@ const chatContainerRef = ref<HTMLElement | null>(null)
 /** shimmer 骨架屏的随机宽度 — 依赖 autoExtracting 以在每次提取时重新生成 */
 const shimmerWidths = computed(() => {
   void autoExtracting.value  // 触发重新计算
-  return Array.from({ length: 8 }, () => 55 + Math.floor(Math.random() * 40))
+  return Array.from({ length: 9 }, () => 55 + Math.floor(Math.random() * 40))
 })
 
 // 工具调用状态条

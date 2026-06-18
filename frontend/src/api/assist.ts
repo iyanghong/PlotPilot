@@ -34,6 +34,7 @@ export interface AssistFieldData {
   title: string
   premise: string
   genre: string
+  sub_genre: string  // 二级分类/网文主题
   world_preset: string
   story_structure: string
   pacing_control: string

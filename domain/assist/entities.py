@@ -76,6 +76,7 @@ class InspireFieldData:
     title: str = ""
     premise: str = ""
     genre: str = ""
+    sub_genre: str = ""  # 二级分类/网文主题（如「星际文明」「东方玄幻」）
     world_preset: str = ""
     story_structure: str = ""
     pacing_control: str = ""
@@ -87,6 +88,7 @@ class InspireFieldData:
             "title": self.title,
             "premise": self.premise,
             "genre": self.genre,
+            "sub_genre": self.sub_genre,
             "world_preset": self.world_preset,
             "story_structure": self.story_structure,
             "pacing_control": self.pacing_control,

@@ -380,11 +380,14 @@ class AssistService:
 
         data = self._parse_json_response(raw)
         genre_str = data.get("genre", "")
+        sub_genre = data.get("sub_genre", "")  # 二级分类/网文主题
         title = data.get("title", "")
         premise = data.get("premise", "")
 
         # ---- Step 2: 匹配 taxonomy 模板并调 LLM 定制化 ----
-        tax_world_tone, tax_wp = _resolve_taxonomy_fields(genre_str)
+        # 将 genre + sub_genre 合并用于 taxonomy 匹配，以便匹配到更精确的子节点
+        genre_for_tax = f"{genre_str}/{sub_genre}" if sub_genre else genre_str
+        tax_world_tone, tax_wp = _resolve_taxonomy_fields(genre_for_tax)
 
         if tax_wp:
             # 用内置模板作为框架，让 LLM 为这部具体作品定制
@@ -412,6 +415,7 @@ class AssistService:
                 title=title,
                 premise=premise,
                 genre=genre_str,
+                sub_genre=sub_genre,
                 world_preset=cust_data.get("worldPreset", tax_world_tone or ""),
                 story_structure=cust_data.get("storyStructure", tax_wp.get("story_structure", "")),
                 pacing_control=cust_data.get("pacingControl", tax_wp.get("pacing_control", "")),
@@ -424,6 +428,7 @@ class AssistService:
                 title=title,
                 premise=premise,
                 genre=genre_str,
+                sub_genre=sub_genre,
                 world_preset=data.get("worldPreset", ""),
                 story_structure=data.get("storyStructure", ""),
                 pacing_control=data.get("pacingControl", ""),
