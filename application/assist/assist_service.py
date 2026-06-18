@@ -14,7 +14,7 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-from domain.ai.value_objects.prompt import Prompt
+from domain.ai.value_objects.prompt import Prompt, Message
 from domain.assist.entities import (
     InspireSession,
     InspireMessage,
@@ -157,6 +157,11 @@ class AssistService:
         self._repo = repository
         self._llm = llm_client or LLMClient()
 
+        # 注册灵感助手工具到全局注册表
+        from infrastructure.ai.tool_registry import get_tool_registry
+        from application.assist.tools import register_assist_tools
+        register_assist_tools(get_tool_registry())
+
     # ---- session management ----
 
     async def create_session(
@@ -221,17 +226,18 @@ class AssistService:
         self,
         session: InspireSession,
         user_message: str,
-    ) -> AsyncIterator[str]:
-        """流式对话 — 返回 AI 回复的逐块文本
-
-        Args:
-            session: 当前灵感和会话
-            user_message: 用户输入的消息文本
+    ) -> AsyncIterator[dict]:
+        """Agent 循环 — 多轮消息 + 工具调用 + 流式输出
 
         Yields:
-            AI 回复的文本片段（逐 token 输出）
+            dict: {"type": "chat_chunk", "content": "..."}
+                  {"type": "tool_call", "name": "...", "args": {...}}
+                  {"type": "tool_result", "name": "...", "summary": "..."}
+                  {"type": "chat_done", "message_type": "question"|"suggestion"}
         """
-        # 1. 保存用户消息（确保在构建上下文之前持久化）
+        from infrastructure.ai.tool_registry import get_tool_registry
+
+        # 1. 保存用户消息
         user_msg = InspireMessage(
             id=f"msg_{uuid.uuid4().hex[:12]}",
             session_id=session.id,
@@ -240,31 +246,63 @@ class AssistService:
         )
         await self._repo.add_message(user_msg)
 
-        # 2. 构建上下文
+        # 2. 构建多轮消息数组
         history = await self._repo.get_messages(session.id)
         strategy = _get_strategy(session.strategy.value)
+        tool_registry = get_tool_registry()
+        tool_defs = tool_registry.get_definitions()
 
-        # 构建带历史的多轮对话 prompt — system prompt 包含全部行为指令，user prompt 只放对话文本
-        conversation = _build_conversation_text(history)
-        prompt = Prompt(
-            system=(
-                f"{strategy.build_system_prompt()}\n\n"
-                f"请根据对话历史给出回复，用中文回复。"
-            ),
-            user=f"{conversation}\n\n助手：",
-        )
+        messages = [Message(role="system", content=strategy.build_agent_system_prompt())]
+        for m in history:
+            messages.append(Message(role=m.role, content=m.content))
 
-        # 3. 流式生成
+        # 3. Agent 循环（最多 5 轮，最多 3 次工具调用）
         full_content = ""
-        try:
-            async for chunk in self._llm.stream_generate(prompt):
-                full_content += chunk
-                yield chunk
-        except Exception:
-            logger.exception("chat 流式生成失败 session=%s", session.id)
-            raise
+        tool_call_count = 0
 
-        # 4. 保存 AI 回复（仅在流式成功完成后）
+        for _ in range(5):
+            result = await self._llm.generate_with_tools(messages, tool_defs)
+
+            # 分支 A：LLM 要调工具
+            if result.tool_calls:
+                for tc in result.tool_calls:
+                    tool_call_count += 1
+                    if tool_call_count > 3:
+                        break
+
+                    yield {"type": "tool_call", "name": tc.name, "args": tc.arguments}
+
+                    tool_result = await tool_registry.execute(tc.name, tc.arguments)
+                    summary = tool_result[:200]
+
+                    yield {"type": "tool_result", "name": tc.name, "summary": summary}
+
+                    # 追加 assistant tool_call 消息（content 为空）
+                    messages.append(Message(
+                        role="assistant", content="",
+                        tool_calls=[tc],
+                    ))
+                    # 追加 tool result 消息
+                    messages.append(Message(
+                        role="tool", content=tool_result,
+                        tool_call_id=tc.id,
+                    ))
+                if tool_call_count > 3:
+                    continue
+                continue
+
+            # 分支 B：LLM 给出文本回复 — 流式输出
+            # 构建不含 tools 的 prompt 用于流式
+            stream_prompt = Prompt(
+                system="", user="", messages=messages, tools=None,
+            )
+            async for chunk in self._llm.stream_generate(stream_prompt):
+                full_content += chunk
+                yield {"type": "chat_chunk", "content": chunk}
+
+            break
+
+        # 4. 保存 AI 回复
         if full_content:
             ai_msg = InspireMessage(
                 id=f"msg_{uuid.uuid4().hex[:12]}",
@@ -273,6 +311,10 @@ class AssistService:
                 content=full_content,
             )
             await self._repo.add_message(ai_msg)
+
+        # 5. 判断消息类型
+        is_question = full_content.strip().endswith("？") or full_content.strip().endswith("?")
+        yield {"type": "chat_done", "message_type": "question" if is_question else "suggestion"}
 
     # ---- field extraction ----
 

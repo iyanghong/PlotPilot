@@ -27,6 +27,13 @@ class BaseInspirationStrategy(ABC):
         """构建系统提示词 — 锁定对话框架"""
         ...
 
+    def build_agent_system_prompt(self) -> str:
+        """构建 Agent 系统提示词 — 用于多轮对话 + 工具调用场景
+
+        默认委托给 build_system_prompt()，子类可覆写以区分 Agent 和非 Agent 场景。
+        """
+        return self.build_system_prompt()
+
     @abstractmethod
     def build_field_extraction_prompt(self, conversation_history: str) -> str:
         """构建字段提取提示词 — 从对话历史中提取结构化字段"""
