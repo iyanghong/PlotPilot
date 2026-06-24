@@ -60,8 +60,8 @@ class DashboardService:
         _novel_filter, _params = self._novel_scope_filter(scope, user_id)
         overview = self._db.fetch_one(
             f"""SELECT COUNT(*) as total_calls,
-                       COALESCE(SUM(json_extract(t.metadata, '$.usage.input_tokens')), 0)
-                       + COALESCE(SUM(json_extract(t.metadata, '$.usage.output_tokens')), 0) as total_tokens
+                       COALESCE(SUM(t.token_input), 0)
+                       + COALESCE(SUM(t.token_output), 0) as total_tokens
                 FROM ai_trace_spans t
                 JOIN novels n ON n.id = t.novel_id
                 WHERE 1=1 {_novel_filter}""",
@@ -69,8 +69,8 @@ class DashboardService:
         )
         today = self._db.fetch_one(
             f"""SELECT COUNT(*) as today_calls,
-                       COALESCE(SUM(json_extract(t.metadata, '$.usage.input_tokens')), 0)
-                       + COALESCE(SUM(json_extract(t.metadata, '$.usage.output_tokens')), 0) as today_tokens,
+                       COALESCE(SUM(t.token_input), 0)
+                       + COALESCE(SUM(t.token_output), 0) as today_tokens,
                        COALESCE(AVG(t.latency_ms), 0) as avg_latency_ms
                 FROM ai_trace_spans t
                 JOIN novels n ON n.id = t.novel_id
@@ -80,8 +80,8 @@ class DashboardService:
         by_model = self._db.fetch_all(
             f"""SELECT COALESCE(t.model, 'unknown') as model,
                        COUNT(*) as calls,
-                       COALESCE(SUM(json_extract(t.metadata, '$.usage.input_tokens')), 0)
-                       + COALESCE(SUM(json_extract(t.metadata, '$.usage.output_tokens')), 0) as tokens
+                       COALESCE(SUM(t.token_input), 0)
+                       + COALESCE(SUM(t.token_output), 0) as tokens
                 FROM ai_trace_spans t
                 JOIN novels n ON n.id = t.novel_id
                 WHERE 1=1 {_novel_filter}
@@ -286,8 +286,8 @@ class DashboardService:
         _novel_filter, _params = self._novel_scope_filter(scope, user_id)
         top_novels = self._db.fetch_all(
             f"""SELECT n.id as novel_id, n.title,
-                       COALESCE(SUM(json_extract(t.metadata, '$.usage.input_tokens')), 0)
-                       + COALESCE(SUM(json_extract(t.metadata, '$.usage.output_tokens')), 0) as total_tokens
+                       COALESCE(SUM(t.token_input), 0)
+                       + COALESCE(SUM(t.token_output), 0) as total_tokens
                 FROM ai_trace_spans t
                 JOIN novels n ON n.id = t.novel_id
                 WHERE 1=1 {_novel_filter}

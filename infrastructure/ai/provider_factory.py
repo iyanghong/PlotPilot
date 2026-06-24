@@ -337,6 +337,8 @@ class DynamicLLMService(LLMService):
             raise
         else:
             content_for_hash = "".join(response_parts)
+            # 尝试从 provider 获取流式调用的 token 用量
+            stream_usage = getattr(provider, "_last_stream_usage", None)
             recorder.record_span(
                 phase="llm_response",
                 trace_context=trace,
@@ -349,6 +351,8 @@ class DynamicLLMService(LLMService):
                 response_hash=content_hash(content_for_hash),
                 response_preview=preview_text("".join(preview_parts)),
                 response_full=content_for_hash,
+                token_input=getattr(stream_usage, "input_tokens", None),
+                token_output=getattr(stream_usage, "output_tokens", None),
                 latency_ms=int((time.perf_counter() - started) * 1000),
                 metadata={**request_metadata, "content_length": total_chars},
             )

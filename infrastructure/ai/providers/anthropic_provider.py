@@ -130,6 +130,7 @@ class AnthropicProvider(BaseProvider):
             ValueError: 如果 API key 未设置
         """
         super().__init__(settings)
+        self._last_stream_usage: TokenUsage | None = None
 
         if not settings.api_key:
             raise ValueError("API key is required for AnthropicProvider")
@@ -363,6 +364,10 @@ class AnthropicProvider(BaseProvider):
                     event_text, buffer = buffer.split("\n\n", 1)
                     events_received += 1
                     text_content = self._parse_sse_event(event_text)
+                    # 尝试从 SSE 事件中提取 usage（message_stop 等）
+                    usage = self._parse_usage_from_sse_event(event_text)
+                    if usage:
+                        self._last_stream_usage = usage
                     if events_received <= 3:
                         logger.info(
                             "[Stream] SSE event #%d raw=%s parsed=%s",
@@ -385,6 +390,16 @@ class AnthropicProvider(BaseProvider):
             async for text in stream.text_stream:
                 if text:
                     yield text
+            # 从 SDK stream 中提取最终的 usage 信息
+            try:
+                final_message = stream.get_final_message()
+                if final_message and final_message.usage:
+                    self._last_stream_usage = TokenUsage(
+                        input_tokens=final_message.usage.input_tokens,
+                        output_tokens=final_message.usage.output_tokens,
+                    )
+            except Exception:
+                pass  # 获取 usage 失败不影响主流程
 
     async def stream_generate(
         self,
@@ -444,8 +459,40 @@ class AnthropicProvider(BaseProvider):
                 f"Both streaming paths produced zero output for model={model_id}: {detail}"
             )
 
+    @staticmethod
+    def _parse_usage_from_sse_event(event_text: str) -> TokenUsage | None:
+        """从 SSE 事件中提取 token 用量（message_stop 或 usage 事件）。"""
+        lines = event_text.strip().split("\n")
+        data = None
+        for line in lines:
+            if line.startswith("data:"):
+                data = line[5:].strip()
+        if not data:
+            return None
+        try:
+            parsed = json.loads(data)
+        except json.JSONDecodeError:
+            return None
+        # Anthropic 原生的 message_stop 事件
+        if parsed.get("type") == "message_stop":
+            usage = parsed.get("usage") or {}
+            input_tokens = usage.get("input_tokens")
+            output_tokens = usage.get("output_tokens")
+            if input_tokens is not None and output_tokens is not None:
+                return TokenUsage(input_tokens=int(input_tokens), output_tokens=int(output_tokens))
+        # OpenAI 兼容格式的 usage（包含在最后 chunk 的 choices[0] 中）
+        usage = parsed.get("usage") or {}
+        if usage.get("prompt_tokens") is not None and usage.get("completion_tokens") is not None:
+            return TokenUsage(
+                input_tokens=int(usage["prompt_tokens"]),
+                output_tokens=int(usage["completion_tokens"]),
+            )
+        return None
+
     def _parse_sse_event(self, event_text: str) -> str:
         """解析单个 SSE 事件，返回文本内容（如果有）。
+
+        同时检测 message_stop/usage 事件并提取 token 用量放入 _last_stream_usage。
 
         兼容多种 SSE 格式：
         - Anthropic 原生: {"type":"content_block_delta","delta":{"type":"text_delta","text":"..."}}
