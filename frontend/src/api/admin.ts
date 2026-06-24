@@ -152,6 +152,8 @@ export interface VersionStatus {
   commits_behind: number
   has_local_changes: boolean
   update_available: boolean
+  /** git 是否可用（Docker 生产环境通常为 false） */
+  git_available: boolean
   last_checked_at: string
 }
 

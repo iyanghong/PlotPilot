@@ -63,18 +63,20 @@ onMounted(() => {
           <span class="version-build">{{ status.build_id }}</span>
         </div>
 
-        <!-- 状态指示 -->
+        <!-- 部署模式 -->
         <div class="version-status-row">
-          <!-- 更新状态 -->
-          <n-tag v-if="status.update_available" type="warning" size="small">
+          <n-tag v-if="!status.git_available" type="default" size="small">
+            Docker 部署
+          </n-tag>
+          <n-tag v-else-if="status.update_available" type="warning" size="small">
             有 {{ status.commits_behind }} 个新提交待拉取
           </n-tag>
           <n-tag v-else type="success" size="small">
             已是最新版本
           </n-tag>
 
-          <!-- 本地改动 -->
-          <n-tag v-if="status.has_local_changes" type="error" size="small">
+          <!-- 本地改动（仅 git 可用时显示） -->
+          <n-tag v-if="status.git_available && status.has_local_changes" type="error" size="small">
             有未提交的本地改动
           </n-tag>
         </div>
@@ -82,6 +84,7 @@ onMounted(() => {
         <!-- 操作按钮 -->
         <div class="version-actions">
           <n-button
+            v-if="status.git_available"
             size="small"
             type="primary"
             :disabled="!status.update_available || status.has_local_changes"
