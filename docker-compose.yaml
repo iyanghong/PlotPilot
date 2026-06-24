@@ -45,7 +45,7 @@ services:
       - ${PLOTPILOT_DATA_DIR:-./data}:/app/data
     command: >
       sh -lc "mkdir -p data logs .models &&
-      uvicorn interfaces.main:app --host 127.0.0.1 --port ${PLOTPILOT_BACKEND_PORT:-8005} --reload"
+      uvicorn interfaces.main:app --host 127.0.0.1 --port ${PLOTPILOT_BACKEND_PORT:-8005} --reload --reload-dir interfaces --reload-dir application --reload-dir domain --reload-dir infrastructure --reload-dir engine"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${PLOTPILOT_BACKEND_PORT:-8005}/health >/dev/null || exit 1"]
       interval: 10s

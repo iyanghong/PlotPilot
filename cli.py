@@ -74,7 +74,14 @@ def main(args=None):
             app,
             host=_host,
             port=_port,
-            reload=parsed_args.reload
+            reload=parsed_args.reload,
+            reload_dirs=parsed_args.reload and [
+                "interfaces",
+                "application",
+                "domain",
+                "infrastructure",
+                "engine",
+            ] or None,
         )
     else:
         parser.print_help()

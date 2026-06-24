@@ -45,6 +45,8 @@ NOISY_LOGGERS = (
     "httpx",
     "anthropic",
     "anthropic._base_client",
+    "watchfiles",
+    "watchfiles.main",
 )
 
 FRAMEWORK_LOGGERS = (
