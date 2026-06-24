@@ -91,16 +91,24 @@ class NovelDTO:
     user_id: Optional[str] = None
 
     @classmethod
-    def from_domain(cls, novel: 'Novel') -> 'NovelDTO':
+    def from_domain(cls, novel: 'Novel', *, include_chapter_content: bool = True) -> 'NovelDTO':
         """从领域对象创建 DTO
 
         Args:
             novel: Novel 领域对象
-
-        Returns:
-            NovelDTO
+            include_chapter_content: 是否包含章节正文（列表场景应为 False 以减少响应体积）
         """
-        chapters = [ChapterDTO.from_domain(chapter) for chapter in novel.chapters]
+        chapters = [
+            ChapterDTO.from_domain(chapter) if include_chapter_content
+            else ChapterDTO(
+                id=chapter.id,
+                number=chapter.number,
+                title=chapter.title,
+                content='',
+                word_count=chapter.word_count.value,
+            )
+            for chapter in novel.chapters
+        ]
         
         _ap = getattr(novel, 'autopilot_status', 'stopped')
         autopilot_status = _ap.value if hasattr(_ap, 'value') else str(_ap)

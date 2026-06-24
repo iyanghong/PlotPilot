@@ -248,6 +248,20 @@ class NovelService:
         except Exception:
             return False
 
+    @staticmethod
+    def _batch_check_has_bible(novel_ids: List[str]) -> set:
+        """批量检查哪些 novel_id 有 Bible（单次 SQL 查询）"""
+        if not novel_ids:
+            return set()
+        try:
+            from infrastructure.persistence.database.connection import get_database
+            placeholders = ','.join(['?'] * len(novel_ids))
+            sql = f"SELECT novel_id FROM bibles WHERE novel_id IN ({placeholders})"
+            rows = get_database().fetch_all(sql, tuple(novel_ids))
+            return {row['novel_id'] for row in rows}
+        except Exception:
+            return set()
+
     def _check_has_outline(self, novel_id: str) -> bool:
         if not self.story_node_repository:
             return False
@@ -258,23 +272,31 @@ class NovelService:
         except Exception:
             return False
 
+    @staticmethod
+    def _batch_check_has_outline(novel_ids: List[str]) -> set:
+        """批量检查哪些 novel_id 有幕节点（单次 SQL 查询）"""
+        if not novel_ids:
+            return set()
+        try:
+            from infrastructure.persistence.database.connection import get_database
+            placeholders = ','.join(['?'] * len(novel_ids))
+            sql = f"SELECT DISTINCT novel_id FROM story_nodes WHERE novel_id IN ({placeholders}) AND node_type = 'act'"
+            rows = get_database().fetch_all(sql, tuple(novel_ids))
+            return {row['novel_id'] for row in rows}
+        except Exception:
+            return set()
+
     def list_novels(self) -> List[NovelDTO]:
-        """列出所有小说
+        """列出所有小说（批量查询，避免 N+1）
 
         Returns:
             NovelDTO 列表
         """
         novels = self.novel_repository.list_all()
-        dtos = []
-        for novel in novels:
-            dto = NovelDTO.from_domain(self._hydrate_chapters(novel))
-            dto.has_bible = self._check_has_bible(novel.novel_id.value)
-            dto.has_outline = self._check_has_outline(novel.novel_id.value)
-            dtos.append(dto)
-        return dtos
+        return self._build_novel_dto_list(novels)
 
     def list_novels_for_user(self, user_id: str) -> List[NovelDTO]:
-        """列出指定用户的小说（RBAC 用户隔离）
+        """列出指定用户的小说（RBAC 用户隔离，批量查询，避免 N+1）
 
         Args:
             user_id: 用户 ID
@@ -283,11 +305,23 @@ class NovelService:
             NovelDTO 列表
         """
         novels = self.novel_repository.list_by_user(user_id)
+        return self._build_novel_dto_list(novels)
+
+    def _build_novel_dto_list(self, novels: List[Novel]) -> List[NovelDTO]:
+        """批量构建 NovelDTO 列表：一次查章节元数据 + 一次查 Bible + 一次查大纲"""
+        if not novels:
+            return []
+        novel_ids = [n.novel_id.value for n in novels]
+        chapters_by_novel = self.chapter_repository.list_chapters_meta_for_novels(novel_ids)
+        bible_ids = self._batch_check_has_bible(novel_ids)
+        outline_ids = self._batch_check_has_outline(novel_ids)
         dtos = []
         for novel in novels:
-            dto = NovelDTO.from_domain(self._hydrate_chapters(novel))
-            dto.has_bible = self._check_has_bible(novel.novel_id.value)
-            dto.has_outline = self._check_has_outline(novel.novel_id.value)
+            nid = novel.novel_id.value
+            novel.chapters = chapters_by_novel.get(nid, [])
+            dto = NovelDTO.from_domain(novel, include_chapter_content=False)
+            dto.has_bible = nid in bible_ids
+            dto.has_outline = nid in outline_ids
             dtos.append(dto)
         return dtos
 

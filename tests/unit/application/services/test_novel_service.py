@@ -77,7 +77,7 @@ class TestNovelService:
 
         assert novel_dto is None
 
-    def test_list_novels(self, service, mock_repository):
+    def test_list_novels(self, service, mock_repository, mock_chapter_repository):
         """测试列出所有小说"""
         # 准备 mock 数据
         novel1 = Novel(
@@ -93,6 +93,9 @@ class TestNovelService:
             target_chapters=20
         )
         mock_repository.list_all.return_value = [novel1, novel2]
+        mock_chapter_repository.list_chapters_meta_for_novels.return_value = {
+            'novel-1': [], 'novel-2': []
+        }
 
         novels = service.list_novels()
 

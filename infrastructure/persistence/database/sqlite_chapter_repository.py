@@ -83,11 +83,26 @@ class SqliteChapterRepository(ChapterRepository):
         return self._row_to_chapter(row)
 
     def list_by_novel(self, novel_id: NovelId) -> List[Chapter]:
-        """列出小说的所有章节"""
+        """列出小说的所有章节（含正文）"""
         sql = "SELECT * FROM chapters WHERE novel_id = ? ORDER BY number ASC"
         rows = self.db.fetch_all(sql, (novel_id.value,))
-
         return [self._row_to_chapter(row) for row in rows]
+
+    def list_chapters_meta_for_novels(self, novel_ids: List[str]) -> Dict[str, List[Chapter]]:
+        """批量获取多个小说的章节元数据（不含正文 content/outline），按 novel_id 分组"""
+        if not novel_ids:
+            return {}
+        placeholders = ','.join(['?'] * len(novel_ids))
+        sql = f"""SELECT id, novel_id, number, title, '' AS content, '' AS outline, status,
+                         tension_score, plot_tension, emotional_tension, pacing_tension,
+                         generation_hint, created_at, updated_at
+                  FROM chapters WHERE novel_id IN ({placeholders})
+                  ORDER BY novel_id, number ASC"""
+        rows = self.db.fetch_all(sql, tuple(novel_ids))
+        result: Dict[str, List[Chapter]] = {nid: [] for nid in novel_ids}
+        for row in rows:
+            result[row['novel_id']].append(self._row_to_chapter(row))
+        return result
 
     def delete(self, chapter_id: ChapterId) -> None:
         """删除章节：单写者内核下 API 线程只入队，由持久化消费者在 writer 上执行。"""
@@ -611,7 +626,7 @@ class SqliteChapterRepository(ChapterRepository):
             novel_id=NovelId(row['novel_id']),
             number=row['number'],
             title=row['title'],
-            content=row['content'],
+            content=row.get('content', '') or '',
             outline=row.get('outline', ''),
             status=status,
             tension_score=row.get('tension_score', 50.0),

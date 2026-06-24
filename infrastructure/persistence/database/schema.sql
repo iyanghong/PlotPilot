@@ -135,6 +135,7 @@ CREATE INDEX IF NOT EXISTS idx_chapters_number ON chapters(novel_id, number);
 CREATE INDEX IF NOT EXISTS idx_triples_novel_id ON triples(novel_id);
 CREATE INDEX IF NOT EXISTS idx_novels_autopilot_status ON novels(autopilot_status);
 CREATE INDEX IF NOT EXISTS idx_novels_current_stage ON novels(current_stage);
+CREATE INDEX IF NOT EXISTS idx_novels_created_at ON novels(created_at);
 CREATE INDEX IF NOT EXISTS idx_triples_subject ON triples(novel_id, subject);
 CREATE INDEX IF NOT EXISTS idx_triples_predicate ON triples(predicate);
 

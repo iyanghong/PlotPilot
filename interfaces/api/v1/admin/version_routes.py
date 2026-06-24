@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -24,8 +25,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 # 通过环境变量注入构建信息（Docker 构建或非 git 部署时使用）
 _ENV_GIT_COMMIT = os.getenv("PLOTPILOT_GIT_COMMIT", "")
 _ENV_GIT_BRANCH = os.getenv("PLOTPILOT_GIT_BRANCH", "")
-# .git 目录是否可访问（用于判断能否执行 git 命令）
-_GIT_DIR_ACCESSIBLE = (_REPO_ROOT / ".git").exists()
+# git 是否完整可用：.git 目录存在 + git 命令在 PATH 中
+_GIT_AVAILABLE = (_REPO_ROOT / ".git").exists() and shutil.which("git") is not None
 
 
 class VersionStatusResponse(BaseModel):
@@ -54,7 +55,7 @@ def _run_git(*args: str, timeout: int = 30) -> tuple[int, str, str]:
 
     若 .git 目录不可访问则跳过执行（避免在无 git 环境中产生无意义报错）。
     """
-    if not _GIT_DIR_ACCESSIBLE:
+    if not _GIT_AVAILABLE:
         return -2, "", ".git 目录不可访问"
     try:
         result = subprocess.run(
@@ -87,9 +88,9 @@ def _resolve_git_info() -> tuple[str, str]:
 
     # 3. 兜底
     if not commit:
-        commit = "N/A（非 git 部署）" if not _GIT_DIR_ACCESSIBLE else "unknown"
+        commit = "N/A（非 git 部署）" if not _GIT_AVAILABLE else "unknown"
     if not branch:
-        branch = "N/A（非 git 部署）" if not _GIT_DIR_ACCESSIBLE else "unknown"
+        branch = "N/A（非 git 部署）" if not _GIT_AVAILABLE else "unknown"
 
     return commit, branch
 
@@ -103,14 +104,14 @@ async def check_version(_admin=Depends(require_admin)):
 
     # 检查本地未提交改动（仅在 git 可用时检查）
     has_local_changes = False
-    if _GIT_DIR_ACCESSIBLE:
+    if _GIT_AVAILABLE:
         rc, status_out, _ = _run_git("status", "--porcelain")
         has_local_changes = rc == 0 and bool(status_out)
 
     # 拉取远程最新信息（仅在 git 可用时执行）
     commits_behind = 0
     update_available = False
-    if _GIT_DIR_ACCESSIBLE:
+    if _GIT_AVAILABLE:
         try:
             _, _, fetch_err = _run_git("fetch", "origin", timeout=60)
             if fetch_err and "fatal" not in fetch_err.lower():
@@ -131,7 +132,7 @@ async def check_version(_admin=Depends(require_admin)):
         commits_behind=commits_behind,
         has_local_changes=has_local_changes,
         update_available=update_available,
-        git_available=_GIT_DIR_ACCESSIBLE,
+        git_available=_GIT_AVAILABLE,
         last_checked_at=datetime.now(timezone.utc).isoformat(),
     )
 
@@ -141,7 +142,7 @@ async def trigger_update(_admin=Depends(require_admin)):
     """触发 git pull 更新 — 仅支持 fast-forward"""
     from datetime import datetime, timezone
 
-    if not _GIT_DIR_ACCESSIBLE:
+    if not _GIT_AVAILABLE:
         return UpdateResponse(
             success=False,
             previous_commit="",
